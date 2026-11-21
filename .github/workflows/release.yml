@@ -1,0 +1,41 @@
+name: Build & Release (Windows)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build installer
+        run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: release/*.exe
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          body: |
+            Windows用インストーラー（非公式ツール・Riot Gamesとは無関係）。
+
+            - ウィッシュリスト登録・スキンカタログ・Discord画像付き通知・重複通知防止・自動監視・トレイ常駐
+            - Riotアカウント方式（非公式・初期状態は無効、リスク同意が必要）：Riot公式ページでログインし、自分のデイリーストアを自動取得
+            - インストール時に「WindowsによってPCが保護されました」と出たら［詳細情報］→［実行］
+
+            使い方は README を参照してください。

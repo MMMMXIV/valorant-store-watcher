@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "headless": "vite-node src/headless/cli.ts --",
-    "dist:win": "electron-vite build && electron-builder --win nsis --x64",
+    "dist:win": "electron-vite build && electron-builder --win nsis --x64 --publish never",
     "dist": "electron-vite build && electron-builder",
     "dist:win:nowine": "node scripts/build-win-installer.mjs"
   },
