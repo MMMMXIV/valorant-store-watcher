@@ -78,6 +78,29 @@ export class WatcherCore {
     return this.providers[s.providerId] ?? this.mock
   }
 
+  /** Non-secret Riot account info (puuid, Riot ID, region) kept in the DB meta table. */
+  loadRiotAccount(): { puuid: string; gameName: string | null; region: string | null } | null {
+    const raw = this.repos.meta.get('riot_account')
+    try {
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  }
+
+  saveRiotAccount(a: { puuid: string; gameName: string | null; region: string | null } | null): void {
+    this.repos.meta.set('riot_account', a ? JSON.stringify(a) : null)
+  }
+
+  /** X-Riot-ClientVersion from Valorant-API (/v1/version), cached in meta by the catalog updater. */
+  async riotClientVersion(): Promise<string> {
+    const cached = this.repos.meta.get('riot_client_version')
+    if (cached) return cached
+    const v = await this.catalogService.fetchVersion()
+    this.repos.meta.set('riot_client_version', v.riotClientVersion)
+    return v.riotClientVersion
+  }
+
   registerProvider(p: StoreProvider): void {
     this.providers[p.id] = p
   }

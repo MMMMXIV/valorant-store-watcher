@@ -33,6 +33,11 @@ const api = {
   openExternal: (url: string) => invoke('app:openExternal', { url }),
   openLogs: () => invoke('app:openLogs'),
   pickJsonFile: () => invoke('dialog:pickJsonFile'),
+  riot: {
+    login: () => invoke('riot:login'),
+    loginWithSsid: (ssid: string) => invoke('riot:loginWithSsid', { ssid }),
+    logout: () => invoke('riot:logout')
+  },
   onStateChanged: (cb: () => void) => {
     const fn = () => cb()
     ipcRenderer.on('state:changed', fn)

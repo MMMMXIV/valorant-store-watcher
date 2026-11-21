@@ -1,12 +1,14 @@
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from 'electron'
-import { WatcherCore, isValidWebhookUrl, parseStoreImport, snapshotFromPicked, formatZonedDateTime, type CheckPlan } from '../core'
+import { WatcherCore, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, parseStoreImport, snapshotFromPicked, formatZonedDateTime, type CheckPlan } from '../core'
 import { matchWishlist } from '../core/monitor/matcher'
 import { IpcSchemas, type IpcChannel } from './ipcSchemas'
 import { Logger } from './logger'
 import { SecretStore } from './secrets'
+import { electronAuthorize, openRiotLoginWindow, wipeRiotSessions } from './riotAuth'
 
 const WEBHOOK_KEY = 'discord.webhook'
+const RIOT_COOKIES_KEY = 'riot.cookies'
 const isDev = !app.isPackaged && process.env.ELECTRON_RENDERER_URL !== undefined
 const startHiddenArg = process.argv.includes('--hidden')
 
@@ -20,6 +22,8 @@ let paused = false
 let lastPlan: CheckPlan | null = null
 let catalogTimer: NodeJS.Timeout | null = null
 let trayHintShown = false
+let riot: RiotStoreProvider
+let reloginNotified = false
 
 app.setAppUserModelId('com.vsw.valorant-store-watcher')
 // Optional override (portable use / automated UI tests)
@@ -55,12 +59,38 @@ async function bootstrap(): Promise<void> {
     wasmPath: wasmPath(),
     fetchImpl: (url, init) => net.fetch(url, init),
     getWebhookUrl: async () => secrets.get(WEBHOOK_KEY),
-    onChange: () => broadcast(),
+    onChange: () => {
+      if (riot?.needsRelogin && !reloginNotified && Notification.isSupported()) {
+        reloginNotified = true
+        new Notification({ title: 'VALORANT Store Watcher', body: 'Riotへの再ログインが必要です。アプリの設定画面からログインしてください。' }).show()
+      }
+      broadcast()
+    },
     onPlan: (p) => {
       lastPlan = p
       updateTray()
     }
   })
+
+  riot = new RiotStoreProvider({
+    fetchImpl: (url, init) => net.fetch(url, init),
+    authorize: electronAuthorize,
+    loadCookies: () => {
+      const raw = secrets.get(RIOT_COOKIES_KEY)
+      try {
+        return raw ? (JSON.parse(raw) as Record<string, string>) : null
+      } catch {
+        return null
+      }
+    },
+    saveCookies: (jar) => secrets.set(RIOT_COOKIES_KEY, JSON.stringify(jar)),
+    loadAccount: () => core.loadRiotAccount(),
+    saveAccount: (a) => core.saveRiotAccount(a),
+    getRegionSetting: () => core.repos.settings.get().riotRegion,
+    getClientVersion: () => core.riotClientVersion(),
+    riskAcknowledged: () => core.repos.settings.get().riskAcknowledged
+  })
+  core.registerProvider(riot)
 
   registerIpc()
   createTray()
@@ -256,6 +286,7 @@ async function buildState() {
     wishlistCount: wishlist.length,
     catalog: core.catalogService.status(),
     webhookConfigured: secrets.has(WEBHOOK_KEY),
+    riot: { loggedIn: riot.loggedIn, needsRelogin: riot.needsRelogin, account: core.loadRiotAccount() },
     secureStorageAvailable: secrets.available(),
     lastRun: core.repos.runs.list(1)[0] ?? null
   }
@@ -320,6 +351,10 @@ function registerIpc(): void {
     errors: core.repos.errors.list(200)
   }))
   handle('settings:update', (patch) => {
+    if (patch.providerId === 'riot' && !(patch.riskAcknowledged ?? core.repos.settings.get().riskAcknowledged)) {
+      throw new Error('Riotアカウント方式を使うには、先にリスクの確認が必要です')
+    }
+    if (patch.riskAcknowledged === false && core.repos.settings.get().providerId === 'riot') patch = { ...patch, providerId: 'mock' }
     const s = core.repos.settings.update(patch)
     if (patch.launchAtLogin !== undefined) applyLoginItem(s.launchAtLogin)
     void core.scheduler.tick()
@@ -342,6 +377,44 @@ function registerIpc(): void {
   handle('webhook:test', async ({ url }) => {
     if (url && !isValidWebhookUrl(url)) throw new Error('Discord Webhook URLの形式ではありません')
     return core.checkService.sendTest(url || undefined)
+  })
+  const afterLogin = async (who: string) => {
+    reloginNotified = false
+    core.repos.monitor.set({ consecutiveFailures: 0, lastError: null, lastErrorAt: null, lastPeriodEnd: null, lastSuccessAt: null })
+    core.repos.settings.update({ providerId: 'riot' })
+    logger.info(`Riotログイン成功: ${who}`)
+    broadcast()
+    // fetch today's store right away
+    const r = await core.checkService.runCheck('manual')
+    return { account: core.loadRiotAccount(), check: summarize(r) }
+  }
+  handle('riot:login', async () => {
+    if (!core.repos.settings.get().riskAcknowledged) throw new Error('先にリスクの確認をしてください')
+    const { redirectUrl, cookies } = await openRiotLoginWindow(mainWindow)
+    const a = await riot.completeLogin(redirectUrl, cookies)
+    return afterLogin(a.gameName ?? 'アカウント')
+  })
+  handle('riot:loginWithSsid', async ({ ssid }) => {
+    if (!core.repos.settings.get().riskAcknowledged) throw new Error('先にリスクの確認をしてください')
+    const v = parseSsidInput(ssid)
+    if (!v) throw new Error('ssid の形式が正しくありません')
+    try {
+      const a = await riot.loginWithSsid(v)
+      return afterLogin(a.gameName ?? 'アカウント')
+    } catch (e) {
+      if (e instanceof RiotAuthRequiredError) throw new Error('この ssid ではログインできませんでした（期限切れか、値が違います）')
+      throw e
+    }
+  })
+  handle('riot:logout', async () => {
+    secrets.delete(RIOT_COOKIES_KEY)
+    core.saveRiotAccount(null)
+    riot.reset()
+    await wipeRiotSessions()
+    if (core.repos.settings.get().providerId === 'riot') core.repos.settings.update({ providerId: 'manual' })
+    logger.info('Riot連携を解除し、認証情報を破棄しました')
+    broadcast()
+    return true
   })
   handle('monitor:setPaused', ({ paused: p }) => setPaused(p))
   handle('diagnostics:get', () => ({

@@ -86,7 +86,19 @@ export function parseStoreImport(text: string, now: Date, source = 'manual'): St
     }
   }
   const sf = StorefrontFormat.safeParse(json)
-  if (sf.success) {
+  if (sf.success) return snapshotFromStorefront(sf.data, now, { accountId: 'manual', accountName: '手動入力', source })
+  throw new ImportFormatError('対応していない形式です（vsw-store-v1 形式 または ストアJSON形式に対応）')
+}
+
+/** Converts a storefront response (v2/v3 `SkinsPanelLayout`) into a snapshot. */
+export function snapshotFromStorefront(
+  data: unknown,
+  now: Date,
+  meta: { accountId: string; accountName: string | null; source: string }
+): StoreSnapshot {
+  const sf = StorefrontFormat.safeParse(data)
+  if (!sf.success) throw new ImportFormatError('ストア応答に SkinsPanelLayout が含まれていません')
+  {
     const p = sf.data.SkinsPanelLayout
     const offers: StoreOfferInput[] = []
     if (p.SingleItemStoreOffers?.length) {
@@ -101,9 +113,8 @@ export function parseStoreImport(text: string, now: Date, source = 'manual'): St
     if (!offers.length) throw new ImportFormatError('ストアのスキン情報が含まれていません')
     const rem = p.SingleItemOffersRemainingDurationInSeconds
     const periodEnd = typeof rem === 'number' && rem > 0 ? new Date(now.getTime() + rem * 1000).toISOString() : utcDayBounds(now).end.toISOString()
-    return { accountId: 'manual', accountName: '手動入力', fetchedAt: now.toISOString(), periodStart: null, periodEnd, source, offers }
+    return { accountId: meta.accountId, accountName: meta.accountName, fetchedAt: now.toISOString(), periodStart: null, periodEnd, source: meta.source, offers }
   }
-  throw new ImportFormatError('対応していない形式です（vsw-store-v1 形式 または ストアJSON形式に対応）')
 }
 
 /** Builds a vsw-store-v1 snapshot from skins picked in the UI. */

@@ -58,6 +58,11 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
           取得方法は <button className="underline" onClick={() => go('settings')}>設定</button> で変更できます。
         </Notice>
       )}
+      {state.provider.id === 'riot' && (state.riot.needsRelogin || !state.riot.loggedIn) && (
+        <Notice tone="red" title={state.riot.loggedIn ? 'Riotへの再ログインが必要です' : 'Riotにログインしていません'}>
+          ストアを自動取得するには <button className="underline" onClick={() => go('settings')}>設定 → Riotアカウント連携</button> からログインしてください。
+        </Notice>
+      )}
       {state.monitor.lastError && (
         <Notice tone="red" title="最後のチェックでエラーが発生しました">
           {state.monitor.lastError}（{fmtDateTime(state.monitor.lastErrorAt, s.timezone)}）

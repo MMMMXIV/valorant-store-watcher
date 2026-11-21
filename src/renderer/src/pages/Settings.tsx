@@ -26,7 +26,7 @@ export function SettingsPage() {
       <PageHeader title="設定" sub="SETTINGS" />
       <div className="grid grid-cols-2 gap-5">
         <div className="space-y-5">
-          <RiotCard />
+          <RiotCard s={s} save={save} />
           <ProviderCard s={s} save={save} />
           <ScheduleCard s={s} save={save} />
         </div>
@@ -44,30 +44,171 @@ export function SettingsPage() {
 
 type SaveFn = (patch: Partial<Settings>, msg?: string) => Promise<void>
 
-function RiotCard() {
+const REGIONS: Array<[Settings['riotRegion'], string]> = [
+  ['auto', '自動判定（推奨）'],
+  ['ap', 'アジア太平洋 (AP) ※日本'],
+  ['kr', '韓国 (KR)'],
+  ['na', '北米 (NA)'],
+  ['eu', 'ヨーロッパ (EU)'],
+  ['latam', '中南米 (LATAM)'],
+  ['br', 'ブラジル (BR)']
+]
+
+function RiotCard({ s, save }: { s: Settings; save: SaveFn }) {
+  const { state } = useData()
+  const toast = useToast()
+  const [agree, setAgree] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [showSsid, setShowSsid] = useState(false)
+  const [ssid, setSsid] = useState('')
+  const riot = state?.riot
+  const run = async (k: string, fn: () => Promise<void>) => {
+    setBusy(k)
+    try {
+      await fn()
+    } catch (e) {
+      toast('err', errText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const afterLogin = (r: { account: { gameName: string | null } | null; check: { status: string; message: string } }) => {
+    toast('ok', `${r.account?.gameName ?? 'Riotアカウント'} でログインしました`)
+    toast(r.check.status === 'success' ? 'ok' : 'err', r.check.message)
+  }
+
+  if (!s.riskAcknowledged) {
+    return (
+      <Card title="Riotアカウント連携（非公式）">
+        <Notice tone="red" title="必ずお読みください">
+          <ul className="list-disc space-y-1 pl-5">
+            <li>Riot Games の<strong>公式APIは個人ストアを提供していません</strong>。この方式はゲームクライアント用の<strong>非公開API</strong>を使う非公式な方法です。</li>
+            <li>Riotの利用規約に反する可能性があり、<strong>アカウントに制限がかかるリスク</strong>はゼロではありません。</li>
+            <li>Riotの仕様変更で予告なく使えなくなることがあります。</li>
+            <li>ログインはRiot公式のログインページで行い、<strong>パスワードは本アプリに渡りません</strong>。保存するのはRiotが発行するログインCookieのみで、Windowsの暗号化機能で保護します。</li>
+            <li>このCookieはパスワードと同じくらい重要です。<strong>他人に渡さないでください。</strong>使うのは<strong>自分のアカウントだけ</strong>にしてください。</li>
+          </ul>
+        </Notice>
+        <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-1 accent-[#ff4655]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+          上記のリスクを理解し、自分のアカウントだけで自己責任で使います
+        </label>
+        <Button className="mt-3" disabled={!agree} onClick={() => void save({ riskAcknowledged: true }, '非公式方式を有効にしました')}>
+          同意して有効にする
+        </Button>
+      </Card>
+    )
+  }
+
   return (
-    <Card title="Riotアカウント連携">
-      <div className="mb-3 flex items-center gap-2">
-        <Badge tone="mute">未連携</Badge>
-        <span className="text-sm">このアプリはRiotアカウントにログインしません</span>
-      </div>
-      <Notice tone="mute">
-        Riot Games の公式APIは<strong>個人別のデイリーストアを提供しておらず</strong>、ストア監視は公式APIの未承認用途とされています。
-        非公式な方法（パスワードやログインCookieを使う方法）は規約違反やアカウント停止のリスクがあるため、本アプリは標準では搭載していません。
-        Riotのパスワードを本アプリに入力することはありません。
-        <div className="mt-2">
-          <button className="text-crimson underline" onClick={() => void api().openExternal('https://developer.riotgames.com/docs/valorant')}>
-            Riot Developer Portal（VALORANT）を開く
-          </button>
+    <Card
+      title="Riotアカウント連携（非公式）"
+      action={riot?.loggedIn ? (riot.needsRelogin ? <Badge tone="red">要再ログイン</Badge> : <Badge tone="teal">ログイン済み</Badge>) : <Badge tone="mute">未ログイン</Badge>}
+    >
+      {riot?.loggedIn && riot.account && (
+        <div className="mb-3 grid grid-cols-2 gap-3 text-xs">
+          <div className="border border-ink-700 px-3 py-2">
+            <div className="text-mute">Riot ID</div>
+            <div className="mt-0.5 text-sm font-bold">{riot.account.gameName ?? '（取得中）'}</div>
+          </div>
+          <div className="border border-ink-700 px-3 py-2">
+            <div className="text-mute">地域</div>
+            <div className="mt-0.5 text-sm font-bold">{riot.account.region?.toUpperCase() ?? '未判定'}</div>
+          </div>
         </div>
-      </Notice>
+      )}
+      {riot?.needsRelogin && (
+        <div className="mb-3">
+          <Notice tone="red">ログインの有効期限が切れました。もう一度ログインしてください（Riotの仕様で定期的に必要になります）。</Notice>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          busy={busy === 'login'}
+          onClick={() =>
+            void run('login', async () => {
+              afterLogin(await api().riot.login())
+            })
+          }
+        >
+          {riot?.loggedIn ? 'Riotに再ログイン' : 'Riot公式ページでログイン'}
+        </Button>
+        {riot?.loggedIn && (
+          <Button
+            variant="danger"
+            busy={busy === 'logout'}
+            onClick={() =>
+              void run('logout', async () => {
+                await api().riot.logout()
+                toast('info', '連携を解除し、ログイン情報を削除しました')
+              })
+            }
+          >
+            連携解除
+          </Button>
+        )}
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-mute">
+        別ウィンドウでRiot公式のログインページ（auth.riotgames.com）が開きます。ウィンドウのタイトルでアドレスを確認できます。2段階認証のコードもそのページに入力してください。
+      </p>
+      <label className="mt-3 block text-xs text-mute">
+        地域
+        <select className={`${inputCls} mt-1`} value={s.riotRegion} onChange={(e) => void save({ riotRegion: e.target.value as Settings['riotRegion'] })}>
+          {REGIONS.map(([v, l]) => (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="mt-3 text-xs text-mute underline hover:text-bone" onClick={() => setShowSsid(!showSsid)}>
+        ログインウィンドウがうまく動かない場合（ssid を貼り付け）
+      </button>
+      {showSsid && (
+        <div className="mt-2 space-y-2 border border-ink-700 p-3 text-xs text-mute">
+          <ol className="list-decimal space-y-1 pl-4">
+            <li>普段のブラウザで Riot のログインページを開いてログインします（下のボタン）。</li>
+            <li>playvalorant.com に移動したら F12 → Application → Cookies → https://auth.riotgames.com を開きます。</li>
+            <li><code>ssid</code> の値をコピーして下に貼り付けます。</li>
+          </ol>
+          <button className="text-crimson underline" onClick={() => void api().openExternal('https://auth.riotgames.com/authorize?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in&client_id=play-valorant-web-prod&response_type=token%20id_token&nonce=1&scope=account%20openid')}>
+            ブラウザでRiotログインページを開く
+          </button>
+          <input type="password" autoComplete="off" spellCheck={false} className={inputCls} placeholder="ssid の値" value={ssid} onChange={(e) => setSsid(e.target.value)} />
+          <Button
+            variant="outline"
+            disabled={ssid.trim().length < 20}
+            busy={busy === 'ssid'}
+            onClick={() =>
+              void run('ssid', async () => {
+                const r = await api().riot.loginWithSsid(ssid)
+                setSsid('')
+                afterLogin(r)
+              })
+            }
+          >
+            ssid でログイン
+          </Button>
+        </div>
+      )}
+      <div className="mt-4 border-t border-ink-700 pt-3">
+        <button className="text-xs text-mute underline hover:text-bone" onClick={() => void save({ riskAcknowledged: false }, '非公式方式を無効にしました')}>
+          非公式方式を無効にする（同意を取り消す）
+        </button>
+      </div>
     </Card>
   )
 }
 
 function ProviderCard({ s, save }: { s: Settings; save: SaveFn }) {
   const { state } = useData()
-  const opts: Array<{ id: Settings['providerId']; title: string; desc: string }> = [
+  const opts: Array<{ id: Settings['providerId']; title: string; desc: string; disabled?: boolean }> = [
+    {
+      id: 'riot',
+      title: 'Riotアカウント（非公式・自分のストア）',
+      desc: s.riskAcknowledged ? 'ログインしたアカウントの実際のデイリーストアを毎日自動で取得します。' : '上の「Riotアカウント連携」でリスクに同意すると選べます。',
+      disabled: !s.riskAcknowledged
+    },
     { id: 'mock', title: 'テスト用ストア（Mock）', desc: 'カタログから毎日ランダムな4スキンを生成します。通知の動作確認用。自動チェック対応。' },
     { id: 'manual', title: '手動取り込み', desc: 'ゲーム内で見たストアをダッシュボードから入力・貼り付け。自動チェックなし。' },
     { id: 'manual-file', title: 'JSONファイル監視', desc: '指定したJSONファイルを定時に読み込みます。ファイルは自分で用意します（形式はREADME参照）。自動チェック対応。' }
@@ -80,8 +221,8 @@ function ProviderCard({ s, save }: { s: Settings; save: SaveFn }) {
     <Card title="ストア取得方法">
       <div className="space-y-2">
         {opts.map((o) => (
-          <label key={o.id} className={`flex cursor-pointer gap-3 border px-4 py-3 ${s.providerId === o.id ? 'border-crimson bg-crimson/5' : 'border-ink-700 hover:border-ink-500'}`}>
-            <input type="radio" className="mt-1 accent-[#ff4655]" checked={s.providerId === o.id} onChange={() => void save({ providerId: o.id }, '取得方法を変更しました')} />
+          <label key={o.id} className={`flex gap-3 border px-4 py-3 ${o.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${s.providerId === o.id ? 'border-crimson bg-crimson/5' : 'border-ink-700 hover:border-ink-500'}`}>
+            <input type="radio" disabled={o.disabled} className="mt-1 accent-[#ff4655]" checked={s.providerId === o.id} onChange={() => void save({ providerId: o.id }, '取得方法を変更しました')} />
             <span>
               <span className="block text-sm font-bold">{o.title}</span>
               <span className="block text-xs text-mute">{o.desc}</span>

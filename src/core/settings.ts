@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { isValidTimeZone } from './util/time'
 
-export const ProviderIdSchema = z.enum(['mock', 'manual', 'manual-file'])
+export const ProviderIdSchema = z.enum(['mock', 'manual', 'manual-file', 'riot'])
 export type ProviderId = z.infer<typeof ProviderIdSchema>
 
 export const SettingsSchema = z.object({
@@ -26,7 +26,10 @@ export const SettingsSchema = z.object({
   /** Absolute path of a JSON file read by the 'manual-file' provider. */
   manualFilePath: z.string().max(1024).nullable().default(null),
   catalogAutoUpdate: z.boolean().default(true),
-  riskAcknowledged: z.boolean().default(false)
+  /** Must be true before the unofficial Riot provider can be used. */
+  riskAcknowledged: z.boolean().default(false),
+  /** Riot region for the store API. 'auto' = detect from Riot (PAS). */
+  riotRegion: z.enum(['auto', 'ap', 'kr', 'na', 'eu', 'latam', 'br']).default('auto')
 })
 export type Settings = z.infer<typeof SettingsSchema>
 

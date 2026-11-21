@@ -109,8 +109,13 @@ export class CatalogService {
     return this.updating
   }
 
+  fetchVersion() {
+    return this.api.version()
+  }
+
   private async doUpdate(force: boolean): Promise<CatalogStatus> {
     const version = await this.api.version()
+    this.meta.set('riot_client_version', version.riotClientVersion)
     const versionKey = `${version.version}|${version.manifestId}`
     if (!force && this.repo.count() > 0 && this.meta.get(META_VERSION) === versionKey) {
       this.meta.set(META_UPDATED, new Date().toISOString())

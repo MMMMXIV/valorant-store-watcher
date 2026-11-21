@@ -24,6 +24,7 @@ export interface AppState {
   wishlistCount: number
   catalog: { skinCount: number; version: string | null; updatedAt: string | null }
   webhookConfigured: boolean
+  riot: { loggedIn: boolean; needsRelogin: boolean; account: { puuid: string; gameName: string | null; region: string | null } | null }
   secureStorageAvailable: boolean
   lastRun: CheckRun | null
 }
@@ -78,6 +79,11 @@ interface VswApi {
   openExternal(url: string): Promise<void>
   openLogs(): Promise<void>
   pickJsonFile(): Promise<string | null>
+  riot: {
+    login(): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>
+    loginWithSsid(ssid: string): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>
+    logout(): Promise<boolean>
+  }
   onStateChanged(cb: () => void): () => void
 }
 

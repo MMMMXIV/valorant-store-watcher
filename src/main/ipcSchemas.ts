@@ -29,7 +29,10 @@ export const IpcSchemas = {
   'diagnostics:get': z.undefined(),
   'app:openExternal': z.object({ url: z.string().url().max(500) }),
   'app:openLogs': z.undefined(),
-  'dialog:pickJsonFile': z.undefined()
+  'dialog:pickJsonFile': z.undefined(),
+  'riot:login': z.undefined(),
+  'riot:loginWithSsid': z.object({ ssid: z.string().min(10).max(4096) }),
+  'riot:logout': z.undefined()
 } as const
 
 export type IpcChannel = keyof typeof IpcSchemas

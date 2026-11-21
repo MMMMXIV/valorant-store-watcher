@@ -66,6 +66,25 @@
   - `StoreProvider` インターフェースで抽象化してあるため、将来Riotが公式に個人ストアAPIを提供した場合は
     Providerを1つ追加するだけで自動取得に対応できます。
 
+## 9. 追記：Riotアカウント方式の実装（利用者の明示的な依頼により追加）
+
+利用者から「自分だけで使う・リスクは承知」との明示的な依頼を受け、次の制約付きで実装しました。
+
+| 手順 | エンドポイント（非公式） | 出典 |
+|---|---|---|
+| ログイン | Riot公式ページ `auth.riotgames.com/authorize?...client_id=play-valorant-web-prod...` → `playvalorant.com/opt_in#access_token=…&id_token=…` | ValorantShopChecker (2026-07), SkinPeek |
+| 再認証 | 上記 authorize に `ssid` Cookie を付けてリダイレクトを追わずに取得（Location にトークン） | 同上 |
+| エンタイトルメント | `POST entitlements.auth.riotgames.com/api/token/v1` | 同上 |
+| アカウント | `GET auth.riotgames.com/userinfo`（sub=PUUID, acct.game_name/tag_line） | SkinPeek |
+| 地域 | `PUT riot-geo.pas.si.riotgames.com/pas/v1/product/valorant` `{id_token}` → `affinities.live`（latam/br は na シャード） | SkinPeek |
+| ストア | `POST pd.{shard}.a.pvp.net/store/v3/storefront/{puuid}` body `{}`、ヘッダー `Authorization`, `X-Riot-Entitlements-JWT`, `X-Riot-ClientVersion`（valorant-api.com /v1/version の riotClientVersion）, `X-Riot-ClientPlatform` | ValorantShopChecker, SkinPeek（v2 から v3 POST に変更済み） |
+
+守っている制約：パスワードを受け取らない／保存しない、MFA・CAPTCHAは利用者がRiotのページで入力、ゲームメモリ読み取り・アンチチート回避なし、
+Cookie は DPAPI で暗号化、Cookie 失効時は自動で再試行を止めて再ログインを促す、認証は最短15秒間隔・ストア取得は1日1回＋失敗時の再試行のみ。
+
+**未検証事項**：開発環境から Riot のサーバーには接続できず、実アカウントでの動作確認はできていません。
+擬似Riotサーバーで、ログイン画面からのトークン・Cookie取得、Cookie再認証、ストア取得、通知までの流れを Electron 実アプリ上で確認済みです。
+
 ## 参照
 - https://developer.riotgames.com/docs/valorant
 - https://valorant-api.com/
