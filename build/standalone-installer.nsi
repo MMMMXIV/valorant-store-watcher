@@ -1,5 +1,5 @@
 ; VALORANT Store Watcher - per-user installer (no admin rights required)
-; Built by scripts/build-win-installer.mjs with native makensis (no Wine needed).
+; Built by scripts/build-win-installer.mjs with native makensis (named so electron-builder does not auto-load it) (no Wine needed).
 Unicode true
 ManifestDPIAware true
 RequestExecutionLevel user
