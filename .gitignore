@@ -9,3 +9,4 @@ release/
 *.sqlite.tmp
 secrets.json
 coverage/
+*.tsbuildinfo
