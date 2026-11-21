@@ -30,6 +30,11 @@ const api = {
   diagnostics: () => invoke('diagnostics:get'),
   openExternal: (url: string) => invoke('app:openExternal', { url }),
   openLogs: () => invoke('app:openLogs'),
+  bot: {
+    set: (userId: string, token?: string) => invoke('bot:set', { token, userId }),
+    clear: () => invoke('bot:clear'),
+    test: () => invoke('bot:test')
+  },
   update: {
     check: () => invoke('update:check'),
     download: () => invoke('update:download'),

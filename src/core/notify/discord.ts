@@ -102,7 +102,7 @@ export function buildErrorPayload(message: string, tz: string, at: Date): Discor
 export function buildTestPayload(): DiscordPayload {
   return {
     username: 'VALORANT Store Watcher',
-    content: `${HEADER}\n✅ テスト通知です。Webhookは正しく設定されています。`,
+    content: `${HEADER}\n✅ テスト通知です。通知先は正しく設定されています。`,
     embeds: [{ title: '通知テスト', description: 'この通知が見えていれば設定は完了です。', color: RED }],
     allowed_mentions: { parse: [] }
   }

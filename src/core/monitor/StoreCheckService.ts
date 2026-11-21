@@ -25,10 +25,18 @@ export interface CheckResult {
   failedNotifications: number
 }
 
+/** A destination that can deliver a Discord message (Webhook channel or BOT DM). */
+export interface Notifier {
+  kind: 'webhook' | 'bot'
+  send(payload: DiscordPayload): Promise<{ attempts: number }>
+}
+
 export interface CheckServiceDeps {
   repos: Repos
   getProvider: () => StoreProvider
   getWebhookUrl: () => Promise<string | null>
+  /** Optional: overrides the webhook (e.g. BOT DM). Returns null when not configured. */
+  getNotifier?: () => Promise<Notifier | null>
   fetchImpl: FetchLike
   now?: () => Date
   sendOptions?: SendOptions
@@ -97,7 +105,7 @@ export class StoreCheckService {
 
       let notified = 0
       let failed = 0
-      const webhook = settings.notificationsEnabled ? await this.deps.getWebhookUrl() : null
+      const webhook = settings.notificationsEnabled ? await this.notifier() : null
       const unresolved = offers.filter((o) => !o.skinId).length
 
       if (webhook && settings.notifyWishlist) {
@@ -119,7 +127,7 @@ export class StoreCheckService {
         `${formatZonedDate(periodDate, settings.timezone)} のストアを確認: 一致 ${matches.length}件 / 新規通知 ${notified}件` +
         (failed ? ` / 通知失敗 ${failed}件` : '') +
         (unresolved ? ` / カタログ未登録 ${unresolved}件` : '') +
-        (!webhook && settings.notificationsEnabled && matches.length ? ' / Webhook未設定のため通知なし' : '')
+        (!webhook && settings.notificationsEnabled && matches.length ? ' / 通知先が未設定のため通知なし' : '')
       repos.runs.finish(runId, { status: 'success', periodKey, matched: matches.length, notified, message })
       repos.monitor.set({
         lastSuccessAt: this.now().toISOString(),
@@ -142,9 +150,16 @@ export class StoreCheckService {
     }
   }
 
-  private async trySend(url: string, payload: DiscordPayload): Promise<{ ok: boolean; attempts: number; error: string | null }> {
+  /** The configured destination (BOT DM if set up, else the webhook). */
+  async notifier(): Promise<Notifier | null> {
+    if (this.deps.getNotifier) return this.deps.getNotifier()
+    const url = await this.deps.getWebhookUrl()
+    return url ? webhookNotifier(this.deps.fetchImpl, url, this.deps.sendOptions) : null
+  }
+
+  private async trySend(target: Notifier, payload: DiscordPayload): Promise<{ ok: boolean; attempts: number; error: string | null }> {
     try {
-      const r = await sendWebhook(this.deps.fetchImpl, url, payload, this.deps.sendOptions)
+      const r = await target.send(payload)
       return { ok: true, attempts: r.attempts, error: null }
     } catch (e) {
       return { ok: false, attempts: this.deps.sendOptions?.maxAttempts ?? 5, error: errorMessage(e) }
@@ -156,7 +171,7 @@ export class StoreCheckService {
     const { repos } = this.deps
     const s = repos.settings.get()
     if (!s.notificationsEnabled || !s.notifyErrors) return
-    const url = await this.deps.getWebhookUrl()
+    const url = await this.notifier()
     if (!url) return
     const key = `err:${formatZonedDate(this.now(), s.timezone)}`
     if (repos.notifications.wasSent('system', key, '', 'error')) return
@@ -164,12 +179,17 @@ export class StoreCheckService {
     repos.notifications.record('system', key, '', 'error', r.ok, r.attempts, r.error)
   }
 
-  async sendTest(url?: string): Promise<{ ok: boolean; message: string }> {
-    const target = url ?? (await this.deps.getWebhookUrl())
-    if (!target) return { ok: false, message: 'Webhook URLが設定されていません' }
+  async sendTest(target?: Notifier): Promise<{ ok: boolean; message: string }> {
+    target ??= (await this.notifier()) ?? undefined
+    if (!target) return { ok: false, message: '通知先（Webhook または BOT）が設定されていません' }
     const r = await this.trySend(target, buildTestPayload())
     this.deps.repos.notifications.record('system', `test:${this.now().toISOString()}`, '', 'test', r.ok, r.attempts, r.error)
     this.deps.onChange?.()
-    return r.ok ? { ok: true, message: 'テスト通知を送信しました。Discordを確認してください。' } : { ok: false, message: r.error ?? '送信に失敗しました' }
+    return r.ok
+      ? { ok: true, message: target.kind === 'bot' ? 'DMにテスト通知を送信しました。Discordを確認してください。' : 'テスト通知を送信しました。Discordを確認してください。' } : { ok: false, message: r.error ?? '送信に失敗しました' }
   }
+}
+
+export function webhookNotifier(fetchImpl: FetchLike, url: string, opts?: SendOptions): Notifier {
+  return { kind: 'webhook', send: (p) => sendWebhook(fetchImpl, url, p, opts) }
 }

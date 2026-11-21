@@ -14,6 +14,7 @@ export interface WatcherCoreOptions {
   wasmPath?: string
   fetchImpl: FetchLike
   getWebhookUrl: () => Promise<string | null>
+  getNotifier?: () => Promise<import('./monitor/StoreCheckService').Notifier | null>
   now?: () => Date
   sendOptions?: SendOptions
   tickMs?: number
@@ -44,6 +45,7 @@ export class WatcherCore {
       repos,
       getProvider: () => this.provider,
       getWebhookUrl: opts.getWebhookUrl,
+      getNotifier: opts.getNotifier,
       fetchImpl: opts.fetchImpl,
       now: opts.now,
       sendOptions: opts.sendOptions,

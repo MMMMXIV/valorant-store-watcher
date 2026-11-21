@@ -164,7 +164,7 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
         <Card title="通知とローカル実行について">
           <ul className="space-y-2 text-xs leading-relaxed text-bone/80">
             <li>
-              Discord通知: {state.webhookConfigured ? <Badge tone="teal">設定済み</Badge> : <Badge tone="amber">未設定</Badge>}
+              Discord通知（{state.settings.notifyChannel === "bot" ? "BOT・DM" : "Webhook"}）: {state.notifierConfigured ? <Badge tone="teal">設定済み</Badge> : <Badge tone="amber">未設定</Badge>}
               {!s.notificationsEnabled && <Badge tone="mute" className="ml-1">通知OFF</Badge>}
             </li>
             <li className="flex gap-2">

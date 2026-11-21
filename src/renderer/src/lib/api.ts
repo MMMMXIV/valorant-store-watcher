@@ -27,6 +27,8 @@ export interface AppState {
   wishlistCount: number
   catalog: { skinCount: number; version: string | null; updatedAt: string | null }
   webhookConfigured: boolean
+  discordBot: { configured: boolean; userId: string | null; app: { id: string; name: string } | null; links: { userInstall: string; serverInvite: string } | null }
+  notifierConfigured: boolean
   riot: { loggedIn: boolean; needsRelogin: boolean; account: { puuid: string; gameName: string | null; region: string | null } | null }
   secureStorageAvailable: boolean
   lastRun: CheckRun | null
@@ -89,6 +91,11 @@ interface VswApi {
   diagnostics(): Promise<Diagnostics>
   openExternal(url: string): Promise<void>
   openLogs(): Promise<void>
+  bot: {
+    set(userId: string, token?: string): Promise<{ app: { id: string; name: string }; links: { userInstall: string; serverInvite: string } }>
+    clear(): Promise<boolean>
+    test(): Promise<{ ok: boolean; message: string }>
+  }
   update: { check(): Promise<UpdateState>; download(): Promise<UpdateState>; install(): Promise<void> }
   riot: {
     login(): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>

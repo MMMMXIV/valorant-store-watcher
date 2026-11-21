@@ -27,6 +27,9 @@ export const IpcSchemas = {
   'riot:login': z.undefined(),
   'riot:loginWithSsid': z.object({ ssid: z.string().min(10).max(4096) }),
   'riot:logout': z.undefined(),
+  'bot:set': z.object({ token: z.string().trim().max(200).optional(), userId: z.string().trim().max(30) }),
+  'bot:clear': z.undefined(),
+  'bot:test': z.undefined(),
   'update:check': z.undefined(),
   'update:download': z.undefined(),
   'update:install': z.undefined()

@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from 'electron'
-import { WatcherCore, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan } from '../core'
+import { WatcherCore, DiscordBotClient, botInstallLinks, isValidBotToken, isValidUserId, webhookNotifier, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan } from '../core'
 import { matchWishlist } from '../core/monitor/matcher'
 import { IpcSchemas, type IpcChannel } from './ipcSchemas'
 import { Logger } from './logger'
@@ -10,6 +10,7 @@ import { AppUpdater } from './updater'
 
 const WEBHOOK_KEY = 'discord.webhook'
 const RIOT_COOKIES_KEY = 'riot.cookies'
+const BOT_TOKEN_KEY = 'discord.botToken'
 const isDev = !app.isPackaged && process.env.ELECTRON_RENDERER_URL !== undefined
 const startHiddenArg = process.argv.includes('--hidden')
 
@@ -63,6 +64,7 @@ async function bootstrap(): Promise<void> {
     wasmPath: wasmPath(),
     fetchImpl: (url, init) => net.fetch(url, init),
     getWebhookUrl: async () => secrets.get(WEBHOOK_KEY),
+    getNotifier: async () => currentNotifier(),
     onChange: () => {
       if (riot?.needsRelogin && !reloginNotified && Notification.isSupported()) {
         reloginNotified = true
@@ -204,7 +206,7 @@ function isAppUrl(url: string): boolean {
   return url.startsWith('file://')
 }
 
-const EXTERNAL_ALLOW = ['https://discord.com/', 'https://support.discord.com/', 'https://valorant-api.com/', 'https://developer.riotgames.com/', 'https://www.riotgames.com/', 'https://github.com/']
+const EXTERNAL_ALLOW = ['https://discord.com/', 'https://auth.riotgames.com/', 'https://support.discord.com/', 'https://valorant-api.com/', 'https://developer.riotgames.com/', 'https://www.riotgames.com/', 'https://github.com/']
 function openExternalSafe(url: string): void {
   if (EXTERNAL_ALLOW.some((p) => url.startsWith(p))) void shell.openExternal(url)
 }
@@ -323,6 +325,11 @@ async function buildState() {
     wishlistCount: wishlist.length,
     catalog: core.catalogService.status(),
     webhookConfigured: secrets.has(WEBHOOK_KEY),
+    discordBot: (() => {
+      const app = botAppInfo()
+      return { configured: secrets.has(BOT_TOKEN_KEY), userId: settings.discordUserId, app, links: app ? botInstallLinks(app.id) : null }
+    })(),
+    notifierConfigured: currentNotifier() !== null,
     riot: { loggedIn: riot.loggedIn, needsRelogin: riot.needsRelogin, account: core.loadRiotAccount() },
     secureStorageAvailable: secrets.available(),
     lastRun
@@ -406,7 +413,34 @@ function registerIpc(): void {
   })
   handle('webhook:test', async ({ url }) => {
     if (url && !isValidWebhookUrl(url)) throw new Error('Discord Webhook URLの形式ではありません')
-    return core.checkService.sendTest(url || undefined)
+    return core.checkService.sendTest(url ? webhookNotifier((u, i) => net.fetch(u, i), url) : undefined)
+  })
+  handle('bot:set', async ({ token, userId }) => {
+    const t = token?.trim() || secrets.get(BOT_TOKEN_KEY)
+    if (!t || !isValidBotToken(t)) throw new Error('BOTトークンの形式が正しくありません')
+    if (!isValidUserId(userId)) throw new Error('DiscordユーザーIDは15〜21桁の数字です')
+    // verify the token before saving (also gives the app id for install links)
+    const app = await new DiscordBotClient((u, i) => net.fetch(u, i), t, { maxAttempts: 2 }).application()
+    if (token?.trim()) secrets.set(BOT_TOKEN_KEY, t)
+    core.repos.meta.set('discord_bot_app', JSON.stringify(app))
+    core.repos.settings.update({ discordUserId: userId.trim(), notifyChannel: 'bot' })
+    logger.info(`Discord BOT を設定しました: ${app.name}`)
+    broadcast()
+    return { app, links: botInstallLinks(app.id) }
+  })
+  handle('bot:clear', () => {
+    secrets.delete(BOT_TOKEN_KEY)
+    botClient = null
+    core.repos.meta.set('discord_bot_app', null)
+    logger.info('Discord BOT トークンを削除しました')
+    broadcast()
+    return true
+  })
+  handle('bot:test', async () => {
+    const c = getBotClient()
+    const uid = core.repos.settings.get().discordUserId
+    if (!c || !uid) return { ok: false, message: 'BOTトークンとユーザーIDを設定してください' }
+    return core.checkService.sendTest({ kind: 'bot', send: (p) => c.sendDm(uid, p) })
   })
   afterLoginFn = async (who: string) => {
     reloginNotified = false
@@ -460,6 +494,35 @@ function registerIpc(): void {
   })
   handle('app:openExternal', ({ url }) => openExternalSafe(url))
   handle('app:openLogs', () => shell.openPath(path.dirname(logger.file)))
+}
+
+let botClient: { token: string; client: DiscordBotClient } | null = null
+function getBotClient(): DiscordBotClient | null {
+  const token = secrets.get(BOT_TOKEN_KEY)
+  if (!token) return null
+  if (botClient?.token !== token) botClient = { token, client: new DiscordBotClient((u, i) => net.fetch(u, i), token) }
+  return botClient.client
+}
+
+/** Notification destination according to settings: BOT DM or Webhook channel. */
+function currentNotifier(): import('../core').Notifier | null {
+  const s = core.repos.settings.get()
+  if (s.notifyChannel === 'bot') {
+    const c = getBotClient()
+    const uid = s.discordUserId
+    return c && uid ? { kind: 'bot', send: (p) => c.sendDm(uid, p) } : null
+  }
+  const url = secrets.get(WEBHOOK_KEY)
+  return url ? webhookNotifier((u, i) => net.fetch(u, i), url) : null
+}
+
+function botAppInfo(): { id: string; name: string } | null {
+  const raw = core.repos.meta.get('discord_bot_app')
+  try {
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
 }
 
 function loadRiotCookies(): Record<string, string> | null {

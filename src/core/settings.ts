@@ -15,6 +15,10 @@ export const SettingsSchema = z.object({
   providerId: ProviderIdSchema.default('riot'),
   retryMinutes: z.array(z.number().int().min(1).max(720)).min(1).max(10).default([5, 15, 30, 60]),
   notificationsEnabled: z.boolean().default(true),
+  /** Where notifications go: a channel via Webhook, or the user's DMs via a BOT. */
+  notifyChannel: z.enum(['webhook', 'bot']).default('webhook'),
+  /** Discord user ID that receives BOT DMs (not secret). */
+  discordUserId: z.string().regex(/^\d{15,21}$/).nullable().default(null),
   notifyWishlist: z.boolean().default(true),
   notifyDailyStore: z.boolean().default(false),
   notifyErrors: z.boolean().default(true),

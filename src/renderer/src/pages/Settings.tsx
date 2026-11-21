@@ -31,7 +31,7 @@ export function SettingsPage() {
           <ScheduleCard s={s} save={save} />
         </div>
         <div className="space-y-5">
-          <WebhookCard />
+          <NotifyTargetCard s={s} save={save} />
           <NotifyCard s={s} save={save} />
           <UpdateCard />
           <WindowsCard s={s} save={save} />
@@ -288,7 +288,111 @@ function ScheduleCard({ s, save }: { s: Settings; save: SaveFn }) {
   )
 }
 
-function WebhookCard() {
+function NotifyTargetCard({ s, save }: { s: Settings; save: SaveFn }) {
+  const { state } = useData()
+  const opts: Array<[Settings['notifyChannel'], string, string]> = [
+    ['webhook', 'Webhook（サーバーのチャンネル）', 'Discordサーバーのチャンネルに投稿します。設定が簡単です。'],
+    ['bot', 'BOT（自分へのDM）', '自分専用のBOTから、あなた個人のDMに届きます。']
+  ]
+  return (
+    <Card title="Discord 通知先" action={state?.notifierConfigured ? <Badge tone="teal">設定済み</Badge> : <Badge tone="amber">未設定</Badge>}>
+      <div className="grid grid-cols-2 gap-2">
+        {opts.map(([id, title, desc]) => (
+          <label key={id} className={`flex cursor-pointer gap-3 border px-4 py-3 ${s.notifyChannel === id ? 'border-crimson bg-crimson/5' : 'border-ink-700 hover:border-ink-500'}`}>
+            <input type="radio" className="mt-1 accent-[#ff4655]" checked={s.notifyChannel === id} onChange={() => void save({ notifyChannel: id }, '通知先を変更しました')} />
+            <span>
+              <span className="block text-sm font-bold">{title}</span>
+              <span className="block text-xs text-mute">{desc}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="mt-4 border-t border-ink-700 pt-4">{s.notifyChannel === 'bot' ? <BotSection s={s} /> : <WebhookSection />}</div>
+    </Card>
+  )
+}
+
+function BotSection({ s }: { s: Settings }) {
+  const { state } = useData()
+  const toast = useToast()
+  const bot = state?.discordBot
+  const [token, setToken] = useState('')
+  const [userId, setUserId] = useState(s.discordUserId ?? '')
+  const [busy, setBusy] = useState<string | null>(null)
+  const run = async (k: string, fn: () => Promise<void>) => {
+    setBusy(k)
+    try {
+      await fn()
+    } catch (e) {
+      toast('err', errText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const open = (url: string) => void api().openExternal(url)
+  return (
+    <div className="space-y-3">
+      <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed text-mute">
+        <li>
+          <button className="text-crimson underline" onClick={() => open('https://discord.com/developers/applications')}>Discord Developer Portal</button> で「New Application」→ 好きな名前で作成
+        </li>
+        <li>左メニュー「Bot」→「Reset Token」でトークンをコピー（他人に見せないでください）</li>
+        <li>Discordの「設定 → 詳細設定 → 開発者モード」をON → 自分のアイコンを右クリック →「ユーザーIDをコピー」</li>
+        <li>下に入力して［保存］→ 表示されるリンクでBOTを追加 →［テスト通知］</li>
+      </ol>
+      <input type="password" autoComplete="off" spellCheck={false} className={inputCls} placeholder={bot?.configured ? 'BOTトークン（設定済み・変更する場合のみ入力）' : 'BOTトークン'} value={token} onChange={(e) => setToken(e.target.value)} />
+      <input className={inputCls} inputMode="numeric" placeholder="あなたのDiscordユーザーID（数字）" value={userId} onChange={(e) => setUserId(e.target.value.replace(/\D/g, '').slice(0, 21))} />
+      <div className="flex flex-wrap gap-2">
+        <Button
+          busy={busy === 'save'}
+          disabled={!userId || (!token.trim() && !bot?.configured)}
+          onClick={() =>
+            void run('save', async () => {
+              const r = await api().bot.set(userId, token.trim() || undefined)
+              setToken('')
+              toast('ok', `BOT「${r.app.name}」を設定しました。次にBOTを追加してください。`)
+            })
+          }
+        >
+          保存
+        </Button>
+        <Button
+          variant="outline"
+          busy={busy === 'test'}
+          disabled={!bot?.configured || !s.discordUserId}
+          onClick={() =>
+            void run('test', async () => {
+              const r = await api().bot.test()
+              toast(r.ok ? 'ok' : 'err', r.message)
+            })
+          }
+        >
+          テスト通知
+        </Button>
+        {bot?.configured && (
+          <Button variant="danger" busy={busy === 'clear'} onClick={() => void run('clear', async () => { await api().bot.clear(); toast('info', 'BOTトークンを削除しました') })}>
+            削除
+          </Button>
+        )}
+      </div>
+      {bot?.app && bot.links && (
+        <div className="border border-ink-700 p-3 text-xs">
+          <div className="mb-2 font-bold">BOT「{bot.app.name}」をあなたとつなぐ（どちらか一方）</div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => open(bot.links!.userInstall)}>① 自分のアカウントに追加（サーバー不要）</Button>
+            <Button variant="outline" onClick={() => open(bot.links!.serverInvite)}>② 自分専用サーバーに招待</Button>
+          </div>
+          <p className="mt-2 leading-relaxed text-mute">
+            まず①を試し、［テスト通知］が「共通のサーバーがありません」で届かない場合は②を使ってください（自分しかいない小さなサーバーを作り、そこにBOTを入れるだけでOKです）。
+          </p>
+        </div>
+      )}
+      <p className="text-xs text-mute">BOTトークンはWindowsの暗号化機能（DPAPI）で保存され、画面に再表示されません。BOTはDMを送る瞬間だけDiscordに接続します。</p>
+    </div>
+  )
+}
+
+function WebhookSection() {
   const { state } = useData()
   const toast = useToast()
   const [url, setUrl] = useState('')
@@ -304,7 +408,8 @@ function WebhookCard() {
     }
   }
   return (
-    <Card title="Discord Webhook" action={state?.webhookConfigured ? <Badge tone="teal">設定済み（暗号化保存）</Badge> : <Badge tone="amber">未設定</Badge>}>
+    <div>
+      <div className="mb-2 text-xs">{state?.webhookConfigured ? <Badge tone="teal">Webhook設定済み（暗号化保存）</Badge> : <Badge tone="amber">Webhook未設定</Badge>}</div>
       <input type="password" autoComplete="off" spellCheck={false} className={inputCls} placeholder={state?.webhookConfigured ? '新しいURLを入力すると上書きします' : 'https://discord.com/api/webhooks/...'} value={url} onChange={(e) => setUrl(e.target.value)} />
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
@@ -353,7 +458,7 @@ function WebhookCard() {
         Webhook URLはWindowsの資格情報保護機能（DPAPI）で暗号化して保存され、画面には表示されません。URLは他人に教えないでください（知っている人は誰でもそのチャンネルに投稿できます）。
         作成方法: Discordのチャンネル設定 → 連携サービス → ウェブフック → 新しいウェブフック → URLをコピー。
       </p>
-    </Card>
+    </div>
   )
 }
 
