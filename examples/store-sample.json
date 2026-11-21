@@ -1,0 +1,10 @@
+{
+  "format": "vsw-store-v1",
+  "date": "2026-11-21",
+  "offers": [
+    { "name": "RGX 11z Pro Vandal", "price": 2175 },
+    { "id": "e046854e-0000-0000-0000-000000000000", "price": 1775 },
+    { "name": "アラクシス ファントム", "price": 2175 },
+    { "name": "Champions 2024 Phantom", "price": 2675 }
+  ]
+}

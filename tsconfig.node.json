@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "composite": true
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "src/core/**/*", "src/headless/**/*", "tests/**/*", "electron.vite.config.ts", "vitest.config.ts"]
+}

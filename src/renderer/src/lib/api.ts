@@ -1,0 +1,96 @@
+import type { CatalogSkin, CheckRun, ContentTier, ErrorLogEntry, MonitorState, NotificationRecord, Priority, StoredSnapshot, Weapon, WishlistItem } from '../../../core/types'
+import type { Settings } from '../../../core/settings'
+
+export type { CatalogSkin, CheckRun, ContentTier, ErrorLogEntry, MonitorState, NotificationRecord, Priority, StoredSnapshot, Weapon, WishlistItem, Settings }
+
+export interface AppState {
+  version: string
+  settings: Settings
+  monitor: MonitorState
+  paused: boolean
+  schedulerRunning: boolean
+  checking: boolean
+  plan: { dueAt: string; reason: string } | null
+  provider: {
+    id: string
+    name: string
+    supportsAutomatic: boolean
+    usesUnofficialRiotApi: boolean
+    status: { ready: boolean; message: string; accountLabel?: string | null }
+  }
+  latestStore: StoredSnapshot | null
+  latestIsCurrent: boolean
+  matchedSkinIds: string[]
+  wishlistCount: number
+  catalog: { skinCount: number; version: string | null; updatedAt: string | null }
+  webhookConfigured: boolean
+  secureStorageAvailable: boolean
+  lastRun: CheckRun | null
+}
+
+export interface CheckSummary {
+  status: 'success' | 'error' | 'skipped'
+  message: string
+  matched: number
+  notified: number
+}
+
+export interface HistoryData {
+  snapshots: StoredSnapshot[]
+  stats: Array<{ skinId: string; count: number; lastSeen: string; skin: CatalogSkin | null }>
+  notifications: NotificationRecord[]
+  runs: CheckRun[]
+  errors: ErrorLogEntry[]
+}
+
+export interface Diagnostics {
+  appVersion: string
+  electron: string
+  chrome: string
+  node: string
+  platform: string
+  userData: string
+  dbSchema: number
+  logs: string
+  loginItem: boolean
+}
+
+interface VswApi {
+  getState(): Promise<AppState>
+  catalog: { list(): Promise<{ skins: CatalogSkin[]; weapons: Weapon[]; tiers: ContentTier[] }>; update(force: boolean): Promise<AppState['catalog']> }
+  wishlist: {
+    list(): Promise<WishlistItem[]>
+    add(skinId: string, priority?: Priority): Promise<WishlistItem>
+    remove(skinId: string): Promise<boolean>
+    setPriority(skinId: string, priority: Priority): Promise<void>
+    reorder(ids: string[]): Promise<void>
+  }
+  store: {
+    checkNow(): Promise<CheckSummary>
+    importJson(text: string): Promise<CheckSummary>
+    importPicked(picks: Array<{ skinId: string; price: number | null }>, date?: string): Promise<CheckSummary>
+  }
+  history(): Promise<HistoryData>
+  settings: { update(patch: Partial<Settings>): Promise<Settings> }
+  webhook: { set(url: string): Promise<boolean>; clear(): Promise<boolean>; test(url?: string): Promise<{ ok: boolean; message: string }> }
+  monitor: { setPaused(paused: boolean): Promise<void> }
+  diagnostics(): Promise<Diagnostics>
+  openExternal(url: string): Promise<void>
+  openLogs(): Promise<void>
+  pickJsonFile(): Promise<string | null>
+  onStateChanged(cb: () => void): () => void
+}
+
+declare global {
+  interface Window {
+    vsw: VswApi
+  }
+}
+
+export const api = (): VswApi => window.vsw
+
+/** Strips Electron's "Error invoking remote method 'x': Error: " prefix. */
+export function errText(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e)
+  return m.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+}

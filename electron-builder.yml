@@ -1,0 +1,33 @@
+appId: com.vsw.valorant-store-watcher
+productName: VALORANT Store Watcher
+copyright: Unofficial fan-made tool. Not affiliated with Riot Games.
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  - "!**/*.map"
+extraResources:
+  - from: resources
+    to: .
+    filter: ["*.png", "*.ico"]
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: VALORANT-Store-Watcher-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: VALORANT Store Watcher
+  uninstallDisplayName: VALORANT Store Watcher
+  language: "1041"
+  installerLanguages: [ja_JP]
+  deleteAppDataOnUninstall: false
+  license: build/license_ja.txt
