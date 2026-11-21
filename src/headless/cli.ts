@@ -5,7 +5,7 @@
  *   npm run headless -- --once                 # one check with the configured provider
  *   npm run headless -- --import store.json    # import a store JSON, match & notify
  *   npm run headless -- --daemon               # keep running with the scheduler
- *   npm run headless -- --set providerId=manual-file --set manualFilePath=/path/store.json
+ *   npm run headless -- --set checkTime=09:10
  *
  * Env: VSW_DB_PATH (default ./vsw-headless.sqlite), VSW_DISCORD_WEBHOOK (secret; never commit)
  */

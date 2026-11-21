@@ -1,9 +1,7 @@
-import fs from 'node:fs/promises'
 import { z } from 'zod'
 import type { StoreOfferInput, StoreSnapshot } from '../types'
 import { VP_CURRENCY_ID } from '../types'
 import { normalizeUuid } from '../util/ids'
-import { ProviderUnavailableError, type ProviderContext, type ProviderStatus, type StoreProvider } from './StoreProvider'
 import { utcDayBounds } from './period'
 
 /** App-native import format. */
@@ -125,47 +123,4 @@ export function snapshotFromPicked(picks: Array<{ skinId: string; price: number 
     JSON.stringify({ format: 'vsw-store-v1', date, offers: picks.map((p) => ({ id: p.skinId, price: p.price ?? undefined })) }),
     now
   )
-}
-
-/** Provider that reads a JSON file on each check (lets an external, user-chosen tool feed the store). */
-export class ManualFileProvider implements StoreProvider {
-  readonly id = 'manual-file'
-  readonly displayName = 'JSONファイル監視'
-  readonly supportsAutomatic = true
-  readonly usesUnofficialRiotApi = false
-
-  constructor(private getPath: () => string | null) {}
-
-  async status(): Promise<ProviderStatus> {
-    const p = this.getPath()
-    if (!p) return { ready: false, message: '読み込むJSONファイルが設定されていません' }
-    try {
-      await fs.access(p)
-      return { ready: true, message: `ファイルを監視中: ${p}` }
-    } catch {
-      return { ready: false, message: `ファイルが見つかりません: ${p}` }
-    }
-  }
-
-  async fetchStore(ctx: ProviderContext): Promise<StoreSnapshot> {
-    const p = this.getPath()
-    if (!p) throw new ProviderUnavailableError('読み込むJSONファイルが設定されていません')
-    const stat = await fs.stat(p)
-    if (stat.size > 1_000_000) throw new ImportFormatError('ファイルが大きすぎます (1MB上限)')
-    return parseStoreImport(await fs.readFile(p, 'utf8'), ctx.now, this.id)
-  }
-}
-
-/** Provider for pasted/picked data: no unattended fetching. */
-export class ManualPasteProvider implements StoreProvider {
-  readonly id = 'manual'
-  readonly displayName = '手動取り込み'
-  readonly supportsAutomatic = false
-  readonly usesUnofficialRiotApi = false
-  async status(): Promise<ProviderStatus> {
-    return { ready: true, message: 'ダッシュボードの「ストアを手動入力」から取り込みます（自動チェックなし）' }
-  }
-  async fetchStore(): Promise<StoreSnapshot> {
-    throw new ProviderUnavailableError('手動取り込みモードでは自動取得できません。ダッシュボードから取り込んでください。')
-  }
 }

@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { isValidTimeZone } from './util/time'
 
-export const ProviderIdSchema = z.enum(['mock', 'manual', 'manual-file', 'riot'])
+/** Store sources. Legacy values ('manual', 'manual-file') from v1.0 are migrated to 'riot'. */
+export const ProviderIdSchema = z.preprocess((v) => (v === 'manual' || v === 'manual-file' ? 'riot' : v), z.enum(['riot', 'mock']))
 export type ProviderId = z.infer<typeof ProviderIdSchema>
 
 export const SettingsSchema = z.object({
@@ -11,7 +12,7 @@ export const SettingsSchema = z.object({
   /** Minutes to wait after the source-reported store refresh before checking. */
   checkDelayMinutes: z.number().int().min(0).max(180).default(5),
   autoCheckEnabled: z.boolean().default(true),
-  providerId: ProviderIdSchema.default('mock'),
+  providerId: ProviderIdSchema.default('riot'),
   retryMinutes: z.array(z.number().int().min(1).max(720)).min(1).max(10).default([5, 15, 30, 60]),
   notificationsEnabled: z.boolean().default(true),
   notifyWishlist: z.boolean().default(true),
@@ -23,8 +24,6 @@ export const SettingsSchema = z.object({
   /** Demo/test mode: Mock store always includes the highest-priority wishlist skin. */
   mockForceWishlistHit: z.boolean().default(false),
   mockSeed: z.string().max(64).default('vsw'),
-  /** Absolute path of a JSON file read by the 'manual-file' provider. */
-  manualFilePath: z.string().max(1024).nullable().default(null),
   catalogAutoUpdate: z.boolean().default(true),
   /** Must be true before the unofficial Riot provider can be used. */
   riskAcknowledged: z.boolean().default(false),

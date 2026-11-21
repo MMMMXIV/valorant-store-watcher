@@ -46,17 +46,100 @@ export const electronAuthorize: AuthorizeFn = (url, cookie) =>
   })
 
 /**
- * Opens Riot's OWN login page in an isolated, in-memory browser session.
+ * Riot's own browser session for the login window. Persisted (Chromium cookie store,
+ * encrypted with DPAPI via the EnableCookieEncryption fuse) so that Riot's
+ * "stay signed in" / trusted-device state survives and re-login is usually one click
+ * or fully silent. Wiped on logout.
+ */
+const LOGIN_PARTITION = 'persist:riot-login'
+function loginSession(): Session {
+  const ses = session.fromPartition(LOGIN_PARTITION)
+  ses.setUserAgent(browserUserAgent())
+  ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
+  return ses
+}
+
+async function captureCookies(ses: Session): Promise<CookieJar> {
+  const list = await ses.cookies.get({ url: 'https://auth.riotgames.com/' })
+  const cookies: CookieJar = {}
+  for (const c of list) cookies[c.name] = c.value
+  return cookies
+}
+
+/**
+ * Puts the app's saved (DPAPI-encrypted) Riot cookies back into the login browser session,
+ * so Riot sees the same signed-in state even if its session cookies were dropped on restart.
+ */
+async function restoreCookies(ses: Session, jar: CookieJar | null): Promise<void> {
+  if (!jar) return
+  const existing = new Set((await ses.cookies.get({ url: 'https://auth.riotgames.com/' })).map((c) => c.name))
+  const expirationDate = Math.floor(Date.now() / 1000) + 30 * 86400
+  for (const [name, value] of Object.entries(jar)) {
+    if (existing.has(name) && name !== 'ssid') continue
+    await ses.cookies
+      .set({ url: 'https://auth.riotgames.com/', name, value, secure: true, httpOnly: true, sameSite: 'no_restriction', expirationDate })
+      .catch(() => undefined)
+  }
+}
+
+/**
+ * Tries to log in WITHOUT any user interaction: loads Riot's authorize page in a hidden window
+ * using the remembered Riot browser session. If Riot redirects straight to opt_in, the new token
+ * and cookies are returned; if Riot shows its login form, returns null (the user must log in).
+ * Nothing is typed or clicked automatically.
+ */
+export function silentRiotLogin(saved: CookieJar | null, timeoutMs = 25_000): Promise<{ redirectUrl: string; cookies: CookieJar } | null> {
+  return new Promise((resolve) => void restoreCookies(loginSession(), saved).finally(() => run(resolve)))
+  function run(resolve: (v: { redirectUrl: string; cookies: CookieJar } | null) => void): void {
+    const ses = loginSession()
+    const win = new BrowserWindow({
+      show: false,
+      width: 480,
+      height: 720,
+      webPreferences: { partition: LOGIN_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false }
+    })
+    let done = false
+    const finish = async (url: string | null) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      clearTimeout(settle)
+      const res = url ? { redirectUrl: url, cookies: await captureCookies(ses) } : null
+      if (!win.isDestroyed()) win.destroy()
+      resolve(res)
+    }
+    const timer = setTimeout(() => void finish(null), timeoutMs)
+    let settle: NodeJS.Timeout | undefined
+    const check = (e: { preventDefault: () => void } | null, url: string) => {
+      if (url.startsWith(RIOT_REDIRECT_PREFIX)) {
+        e?.preventDefault()
+        void finish(url)
+      }
+    }
+    win.webContents.on('will-redirect', (e) => check(e, e.url))
+    win.webContents.on('will-navigate', (e) => check(e, e.url))
+    win.webContents.on('did-navigate', (_e, url) => check(null, url))
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    // the login form stayed on screen → Riot wants credentials; give scripted redirects a few seconds
+    win.webContents.on('did-finish-load', () => {
+      clearTimeout(settle)
+      settle = setTimeout(() => void finish(null), 6000)
+    })
+    void win.loadURL(RIOT_AUTHORIZE_URL).catch(() => void finish(null))
+  }
+}
+
+/**
+ * Opens Riot's OWN login page in an isolated browser session.
  * The user types credentials / MFA / CAPTCHA directly into Riot's page; this app injects
  * no script and never reads the form. When Riot redirects to playvalorant.com/opt_in,
  * the token URL and the auth.riotgames.com cookies are captured and the session is wiped.
  */
-export function openRiotLoginWindow(parent: BrowserWindow | null): Promise<{ redirectUrl: string; cookies: CookieJar }> {
+export async function openRiotLoginWindow(parent: BrowserWindow | null, saved: CookieJar | null = null): Promise<{ redirectUrl: string; cookies: CookieJar }> {
+  await restoreCookies(loginSession(), saved)
   return new Promise((resolve, reject) => {
-    const partition = `riot-login-${Date.now()}` // no "persist:" prefix → memory only
-    const ses = session.fromPartition(partition)
-    ses.setUserAgent(browserUserAgent())
-    ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
+    const partition = LOGIN_PARTITION
+    const ses = loginSession()
     const win = new BrowserWindow({
       width: 520,
       height: 780,
@@ -73,14 +156,10 @@ export function openRiotLoginWindow(parent: BrowserWindow | null): Promise<{ red
       finished = true
       clearTimeout(timeout)
       try {
-        if (!err && redirectUrl) {
-          const list = await ses.cookies.get({ url: 'https://auth.riotgames.com/' })
-          const cookies: CookieJar = {}
-          for (const c of list) cookies[c.name] = c.value
-          resolve({ redirectUrl, cookies })
-        } else reject(err ?? new Error('ログインに失敗しました'))
+        if (!err && redirectUrl) resolve({ redirectUrl, cookies: await captureCookies(ses) })
+        else reject(err ?? new Error('ログインに失敗しました'))
       } finally {
-        await ses.clearStorageData().catch(() => undefined)
+        // Riot's session is kept (encrypted) for one-click / silent re-login; wiped on logout
         if (!win.isDestroyed()) win.destroy()
       }
     }
@@ -118,4 +197,5 @@ export function openRiotLoginWindow(parent: BrowserWindow | null): Promise<{ red
 
 export async function wipeRiotSessions(): Promise<void> {
   await riotApiSession().clearStorageData().catch(() => undefined)
+  await session.fromPartition(LOGIN_PARTITION).clearStorageData().catch(() => undefined)
 }

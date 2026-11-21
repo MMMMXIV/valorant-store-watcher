@@ -25,6 +25,8 @@ export interface StoreProvider {
   readonly supportsAutomatic: boolean
   /** Whether the provider talks to Riot services (unofficial). Shown as a risk in the UI. */
   readonly usesUnofficialRiotApi: boolean
+  /** Cheap synchronous check: false → the scheduler does not run (e.g. not logged in). */
+  canRunAutomatically?(): boolean
   status(ctx: ProviderContext): Promise<ProviderStatus>
   fetchStore(ctx: ProviderContext): Promise<StoreSnapshot>
 }

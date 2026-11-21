@@ -3,8 +3,7 @@ import { createRepos, type Repos } from './db/repositories'
 import { CatalogService } from './catalog/CatalogService'
 import { ValorantApiClient } from './catalog/valorantApi'
 import { MockStoreProvider } from './providers/MockStoreProvider'
-import { ManualFileProvider, ManualPasteProvider } from './providers/ManualImport'
-import type { StoreProvider } from './providers/StoreProvider'
+import { ProviderUnavailableError, type StoreProvider } from './providers/StoreProvider'
 import { StoreCheckService } from './monitor/StoreCheckService'
 import { MonitorScheduler, type CheckPlan } from './monitor/Scheduler'
 import type { FetchLike } from './util/http'
@@ -39,11 +38,7 @@ export class WatcherCore {
   ) {
     const s = repos.settings.get()
     this.mock = new MockStoreProvider({ seed: s.mockSeed, forceWishlistHit: s.mockForceWishlistHit }, (id) => this.firstLevelId(id))
-    this.providers = {
-      mock: this.mock,
-      manual: new ManualPasteProvider(),
-      'manual-file': new ManualFileProvider(() => repos.settings.get().manualFilePath)
-    }
+    this.providers = { mock: this.mock, riot: new UnavailableRiotProvider() }
     this.catalogService = new CatalogService(repos.catalog, repos.meta, new ValorantApiClient(opts.fetchImpl))
     this.checkService = new StoreCheckService({
       repos,
@@ -58,7 +53,7 @@ export class WatcherCore {
       service: this.checkService,
       getSettings: () => repos.settings.get(),
       getState: () => repos.monitor.get(),
-      supportsAutomatic: () => this.provider.supportsAutomatic,
+      supportsAutomatic: () => this.provider.supportsAutomatic && (this.provider.canRunAutomatically?.() ?? true),
       now: opts.now,
       tickMs: opts.tickMs,
       onPlan: opts.onPlan
@@ -75,7 +70,8 @@ export class WatcherCore {
     const s = this.repos.settings.get()
     this.mock.options.seed = s.mockSeed
     this.mock.options.forceWishlistHit = s.mockForceWishlistHit
-    return this.providers[s.providerId] ?? this.mock
+    // never silently fall back to the mock store
+    return this.providers[s.providerId] ?? this.providers.riot
   }
 
   /** Non-secret Riot account info (puuid, Riot ID, region) kept in the DB meta table. */
@@ -113,5 +109,22 @@ export class WatcherCore {
   close(): void {
     this.scheduler.stop()
     this.repos.db.close()
+  }
+}
+
+/** Placeholder until the desktop app registers the real Riot provider (e.g. in the headless runner). */
+class UnavailableRiotProvider implements StoreProvider {
+  readonly id = 'riot'
+  readonly displayName = 'Riotアカウント（非公式・自分のストア）'
+  readonly supportsAutomatic = true
+  readonly usesUnofficialRiotApi = true
+  canRunAutomatically(): boolean {
+    return false
+  }
+  async status() {
+    return { ready: false, message: 'Riotアカウント方式はデスクトップアプリでのみ利用できます' }
+  }
+  async fetchStore(): Promise<never> {
+    throw new ProviderUnavailableError('Riotアカウント方式はデスクトップアプリでのみ利用できます')
   }
 }

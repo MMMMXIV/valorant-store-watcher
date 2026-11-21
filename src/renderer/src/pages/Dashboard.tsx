@@ -1,24 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { Page } from '../App'
 import { StoreSkinCard } from '../components/SkinCard'
-import { IconAlert, IconRefresh, IconPlus, IconSearch, IconX } from '../components/Icons'
+import { IconAlert, IconRefresh } from '../components/Icons'
 import { SkinImage } from '../components/SkinImage'
-import { Badge, Button, Card, Modal, Notice, inputCls, useToast } from '../components/ui'
-import { api, errText, type CatalogSkin } from '../lib/api'
+import { Badge, Button, Card, Notice, useToast } from '../components/ui'
+import { api, errText } from '../lib/api'
 import { fmtDate, fmtDateTime, fmtRelative, periodDay } from '../lib/format'
 import { useData } from '../lib/store'
-import { searchSkinsUi } from '../lib/search'
 
 export function Dashboard({ go }: { go: (p: Page) => void }) {
   const { state, wishlist } = useData()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
-  const [importOpen, setImportOpen] = useState(false)
   if (!state) return null
   const s = state.settings
   const store = state.latestStore
   const matched = new Set(state.matchedSkinIds)
-  const auto = state.provider.supportsAutomatic
+  const isRiot = state.provider.id === 'riot'
+  const ready = state.provider.ready
 
   const checkNow = async () => {
     setBusy(true)
@@ -31,51 +30,57 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
       setBusy(false)
     }
   }
+  const login = async () => {
+    setBusy(true)
+    try {
+      await api().riot.login()
+      toast('ok', 'ログインしました')
+    } catch (e) {
+      toast('err', errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
-  const monitorOn = state.schedulerRunning && s.autoCheckEnabled && auto
+  const monitorOn = state.schedulerRunning && s.autoCheckEnabled && ready
+  // show the fetch error unless a newer successful store exists
+  const err = state.fetchError && (!store || new Date(state.fetchError.at).getTime() > new Date(store.fetchedAt).getTime()) ? state.fetchError : null
   return (
     <div className="space-y-6">
       <PageHeader
         title="ダッシュボード"
         sub="DASHBOARD"
         right={
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setImportOpen(true)}>
-              <IconPlus width={16} height={16} /> ストアを手動入力
-            </Button>
-            {auto && (
-              <Button onClick={checkNow} busy={busy || state.checking}>
-                <IconRefresh width={16} height={16} /> 今すぐチェック
-              </Button>
-            )}
-          </div>
+          <Button onClick={checkNow} busy={busy || state.checking} disabled={!ready}>
+            <IconRefresh width={16} height={16} /> 今すぐチェック
+          </Button>
         }
       />
 
       {state.provider.id === 'mock' && (
         <Notice tone="amber" title="テストモード：表示中のストアは疑似データです">
-          現在の取得方法は「テスト用ストア（Mock）」です。実際のVALORANTストアではありません。通知の流れを確認する用途に使えます。
-          取得方法は <button className="underline" onClick={() => go('settings')}>設定</button> で変更できます。
+          取得方法が「テスト用ストア」になっています。実際のVALORANTストアではありません。
+          自分のストアを取得するには <button className="underline" onClick={() => go('settings')}>設定 → ストア取得方法</button> で「Riotアカウント」を選んでください。
         </Notice>
       )}
-      {state.provider.id === 'riot' && (state.riot.needsRelogin || !state.riot.loggedIn) && (
-        <Notice tone="red" title={state.riot.loggedIn ? 'Riotへの再ログインが必要です' : 'Riotにログインしていません'}>
-          ストアを自動取得するには <button className="underline" onClick={() => go('settings')}>設定 → Riotアカウント連携</button> からログインしてください。
-        </Notice>
-      )}
-      {state.monitor.lastError && (
-        <Notice tone="red" title="最後のチェックでエラーが発生しました">
-          {state.monitor.lastError}（{fmtDateTime(state.monitor.lastErrorAt, s.timezone)}）
+      {state.update?.status === 'available' && (
+        <Notice tone="teal" title={`新しいバージョン v${state.update.version} があります`}>
+          <button className="underline" onClick={() => go('settings')}>設定 → アップデート</button> から更新できます。
         </Notice>
       )}
 
       <div className="grid grid-cols-4 gap-4">
-        <Stat label="監視状態" value={state.checking ? 'チェック中' : monitorOn ? '監視中' : state.paused ? '一時停止' : auto ? '自動チェックOFF' : '手動モード'} tone={monitorOn ? 'teal' : 'mute'} sub={state.provider.name} />
+        <Stat
+          label="監視状態"
+          value={state.checking ? 'チェック中' : monitorOn ? '監視中' : state.paused ? '一時停止' : !ready ? '要対応' : '自動チェックOFF'}
+          tone={monitorOn ? 'teal' : !ready ? 'red' : 'mute'}
+          sub={state.provider.name}
+        />
         <Stat label="最終チェック" value={state.monitor.lastSuccessAt ? fmtDateTime(state.monitor.lastSuccessAt, s.timezone).slice(5) : '未実行'} sub={state.monitor.lastSuccessAt ? fmtRelative(state.monitor.lastSuccessAt) : '—'} />
         <Stat
           label="次回チェック予定"
           value={state.plan ? fmtDateTime(state.plan.dueAt, s.timezone).slice(5) : '—'}
-          sub={state.plan ? `${fmtRelative(state.plan.dueAt)}・${planReason(state.plan.reason)}` : auto ? '自動チェックが無効です' : '手動取り込みモード'}
+          sub={state.plan ? `${fmtRelative(state.plan.dueAt)}・${planReason(state.plan.reason)}` : !ready ? '取得の準備ができていません' : '自動チェックが無効です'}
         />
         <Stat label="ウィッシュリスト一致" value={`${state.matchedSkinIds.length} / ${state.wishlistCount}`} tone={state.matchedSkinIds.length ? 'red' : 'mute'} sub={state.latestIsCurrent ? '本日のストア' : '最新の取得結果'} />
       </div>
@@ -83,24 +88,56 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
       <Card
         title={
           <>
-            {state.latestIsCurrent ? '本日のストア' : '最新のストア'}
+            {state.latestIsCurrent && !err ? '本日のストア' : '最新のストア'}
             {store && <span className="ml-2 normal-case tracking-normal text-mute/80">{fmtDate(periodDay(store), s.timezone)}</span>}
           </>
         }
         action={store && <span className="text-xs text-mute">取得 {fmtDateTime(store.fetchedAt, s.timezone)} ・ 更新 {store.periodEnd ? fmtDateTime(store.periodEnd, s.timezone) : '不明'}</span>}
       >
-        {store ? (
+        {!ready ? (
+          <StatusPanel
+            title={isRiot ? (state.riot.needsRelogin ? 'Riotへの再ログインが必要です' : !s.riskAcknowledged ? 'Riotアカウント連携が未設定です' : 'Riotにログインしていません') : 'ストアを取得できません'}
+            message={state.provider.status.message}
+            actions={
+              <>
+                {isRiot && s.riskAcknowledged && (
+                  <Button onClick={login} busy={busy}>
+                    Riotにログイン
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => go('settings')}>
+                  設定を開く
+                </Button>
+              </>
+            }
+          />
+        ) : err ? (
+          <StatusPanel
+            title="ストアを取得できませんでした"
+            message={`${err.message ?? '不明なエラー'}（${fmtDateTime(err.at, s.timezone)}）`}
+            sub={state.plan ? `次の自動再試行: ${fmtDateTime(state.plan.dueAt, s.timezone)}（${fmtRelative(state.plan.dueAt)}）` : undefined}
+            actions={
+              <>
+                <Button onClick={checkNow} busy={busy || state.checking}>
+                  <IconRefresh width={16} height={16} /> 再試行
+                </Button>
+                <Button variant="outline" onClick={() => go('history')}>
+                  エラー履歴を見る
+                </Button>
+              </>
+            }
+          />
+        ) : store ? (
           <div className="grid grid-cols-4 gap-4">
             {store.offers.map((o) => (
               <StoreSkinCard key={o.slot} slot={o.slot} skin={o.skin} price={o.price} matched={!!o.skinId && matched.has(o.skinId)} />
             ))}
           </div>
         ) : (
-          <div className="py-12 text-center text-mute">
-            まだストア情報がありません。{auto ? '「今すぐチェック」を押すか、' : ''}「ストアを手動入力」から取り込んでください。
-          </div>
+          <div className="py-12 text-center text-mute">まだストアを取得していません。「今すぐチェック」を押すと取得します。</div>
         )}
-        {store && !state.latestIsCurrent && <p className="mt-4 text-xs text-amber">※ このストアは更新期間を過ぎています。次回チェックで更新されます。</p>}
+        {store && err && <p className="mt-4 text-xs text-amber">※ 前回取得できたストア（{fmtDate(periodDay(store), s.timezone)}）は「履歴」で確認できます。</p>}
+        {store && !err && ready && !state.latestIsCurrent && <p className="mt-4 text-xs text-amber">※ このストアは更新期間を過ぎています。次回チェックで更新されます。</p>}
       </Card>
 
       <div className="grid grid-cols-3 gap-4">
@@ -138,7 +175,20 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
           </ul>
         </Card>
       </div>
-      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+    </div>
+  )
+}
+
+function StatusPanel({ title, message, sub, actions }: { title: string; message: string; sub?: string; actions?: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-4 border border-crimson/50 bg-crimson/5 px-6 py-6">
+      <IconAlert width={28} height={28} className="mt-0.5 shrink-0 text-crimson" />
+      <div className="flex-1">
+        <div className="text-lg font-bold">{title}</div>
+        <div className="mt-1 text-sm text-bone/85">{message}</div>
+        {sub && <div className="mt-1 text-xs text-mute">{sub}</div>}
+        {actions && <div className="mt-4 flex flex-wrap gap-2">{actions}</div>}
+      </div>
     </div>
   )
 }
@@ -167,114 +217,5 @@ function Stat({ label, value, sub, tone = 'default' }: { label: string; value: s
       <div className={`mt-1.5 truncate text-2xl font-black ${c}`}>{value}</div>
       {sub && <div className="mt-1 truncate text-xs text-mute">{sub}</div>}
     </div>
-  )
-}
-
-function ImportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { skins } = useData()
-  const toast = useToast()
-  const [tab, setTab] = useState<'pick' | 'json'>('pick')
-  const [q, setQ] = useState('')
-  const [picks, setPicks] = useState<Array<{ skin: CatalogSkin; price: string }>>([])
-  const [json, setJson] = useState('')
-  const [busy, setBusy] = useState(false)
-  const results = useMemo(() => (q.trim() ? searchSkinsUi(skins, q, null).slice(0, 12) : []), [skins, q])
-
-  const submit = async () => {
-    setBusy(true)
-    try {
-      const r =
-        tab === 'pick'
-          ? await api().store.importPicked(picks.map((p) => ({ skinId: p.skin.id, price: p.price ? Number(p.price) : null })))
-          : await api().store.importJson(json)
-      toast(r.status === 'success' ? 'ok' : 'err', r.message)
-      if (r.status === 'success') {
-        setPicks([])
-        setJson('')
-        onClose()
-      }
-    } catch (e) {
-      toast('err', errText(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="ストアを手動入力" wide>
-      <div className="mb-4 flex gap-1">
-        {(['pick', 'json'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 text-sm font-semibold ${tab === t ? 'bg-crimson text-white' : 'bg-ink-800 text-mute hover:text-bone'}`}>
-            {t === 'pick' ? 'スキンを選んで入力' : 'JSONを貼り付け'}
-          </button>
-        ))}
-      </div>
-      {tab === 'pick' ? (
-        <div className="space-y-4">
-          <p className="text-xs text-mute">ゲーム内のストアに並んでいるスキンを最大4つ選び、価格を入力してください。今日のストアとして記録・照合されます。</p>
-          <div className="relative">
-            <IconSearch className="absolute left-3 top-2.5 text-mute" />
-            <input className={`${inputCls} pl-10`} placeholder="スキン名で検索（日本語・英語）" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          {results.length > 0 && (
-            <div className="grid max-h-48 grid-cols-2 gap-1 overflow-auto">
-              {results.map((s) => (
-                <button
-                  key={s.id}
-                  disabled={picks.length >= 4 || picks.some((p) => p.skin.id === s.id)}
-                  onClick={() => {
-                    setPicks([...picks, { skin: s, price: '' }])
-                    setQ('')
-                  }}
-                  className="flex items-center gap-2 bg-ink-800 px-2 py-1.5 text-left text-sm hover:bg-ink-700 disabled:opacity-40"
-                >
-                  <SkinImage skin={s} className="h-6 w-12" />
-                  <span className="truncate">{s.nameJa}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="space-y-2">
-            {picks.map((p, i) => (
-              <div key={p.skin.id} className="flex items-center gap-3 border border-ink-700 px-3 py-2">
-                <SkinImage skin={p.skin} className="h-8 w-16" />
-                <span className="flex-1 truncate text-sm font-semibold">{p.skin.nameJa}</span>
-                <input
-                  className={`${inputCls} max-w-28`}
-                  placeholder="VP"
-                  inputMode="numeric"
-                  value={p.price}
-                  onChange={(e) => setPicks(picks.map((x, j) => (j === i ? { ...x, price: e.target.value.replace(/\D/g, '').slice(0, 6) } : x)))}
-                />
-                <button className="text-mute hover:text-crimson" onClick={() => setPicks(picks.filter((_, j) => j !== i))} aria-label="削除">
-                  <IconX />
-                </button>
-              </div>
-            ))}
-            {!picks.length && <div className="py-4 text-center text-xs text-ink-500">まだ選択されていません</div>}
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-xs text-mute">
-            <code>vsw-store-v1</code> 形式、またはストアAPI形式（<code>SkinsPanelLayout</code> を含むJSON）に対応しています。詳しくはREADMEを参照してください。
-          </p>
-          <textarea
-            className={`${inputCls} h-56 font-mono text-xs`}
-            placeholder={'{\n  "format": "vsw-store-v1",\n  "date": "2026-11-21",\n  "offers": [ { "id": "スキンまたはレベルのUUID", "price": 1775 } ]\n}'}
-            value={json}
-            onChange={(e) => setJson(e.target.value)}
-          />
-        </div>
-      )}
-      <div className="mt-6 flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>
-          キャンセル
-        </Button>
-        <Button onClick={submit} busy={busy} disabled={tab === 'pick' ? !picks.length : json.trim().length < 2}>
-          取り込んで照合する
-        </Button>
-      </div>
-    </Modal>
   )
 }

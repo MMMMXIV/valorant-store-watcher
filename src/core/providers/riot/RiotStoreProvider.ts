@@ -53,6 +53,11 @@ export interface RiotProviderDeps {
   getRegionSetting: () => string // 'auto' | region
   getClientVersion: () => Promise<string>
   riskAcknowledged: () => boolean
+  /**
+   * Optional: re-login WITHOUT user interaction by reusing Riot's own browser session
+   * (the persistent login window). Returns null when Riot asks for credentials.
+   */
+  silentRelogin?: () => Promise<{ redirectUrl: string; cookies: CookieJar } | null>
   now?: () => Date
   timeoutMs?: number
 }
@@ -79,6 +84,8 @@ export class RiotStoreProvider implements StoreProvider {
   private lastAuthAt = 0
   /** Set when Riot rejected the saved cookie; no more auth requests until the user logs in again. */
   private authBroken = false
+  private lastAuthOkAt = 0
+  private lastSilentAt = 0
 
   constructor(private deps: RiotProviderDeps) {}
 
@@ -104,10 +111,27 @@ export class RiotStoreProvider implements StoreProvider {
     this.session = null
     this.authBroken = false
     this.lastAuthAt = 0
+    this.lastSilentAt = 0
   }
 
   get needsRelogin(): boolean {
     return this.authBroken
+  }
+
+  canRunAutomatically(): boolean {
+    return this.deps.riskAcknowledged() && this.loggedIn && !this.authBroken
+  }
+
+  /**
+   * Keeps the Riot session alive: re-authenticates with the cookie when the last successful
+   * auth is older than `maxAgeMs`, so Riot keeps rotating/extending the ssid cookie.
+   * Returns true if a refresh happened.
+   */
+  async keepAlive(maxAgeMs = 12 * 3600_000): Promise<boolean> {
+    if (!this.canRunAutomatically()) return false
+    if (this.lastAuthOkAt && this.now() - this.lastAuthOkAt < maxAgeMs) return false
+    await this.ensureSession(true)
+    return true
   }
 
   /** Completes a fresh login from the opt_in redirect + cookies captured by the login window. */
@@ -119,6 +143,7 @@ export class RiotStoreProvider implements StoreProvider {
     this.deps.saveCookies(jar)
     this.deps.saveAccount(null)
     await this.establish(t.accessToken, t.idToken, t.expiresIn)
+    this.lastAuthOkAt = this.now()
     return this.deps.loadAccount()!
   }
 
@@ -130,6 +155,7 @@ export class RiotStoreProvider implements StoreProvider {
     this.deps.saveCookies(res.jar)
     this.deps.saveAccount(null)
     await this.establish(res.accessToken, res.idToken, res.expiresIn)
+    this.lastAuthOkAt = this.now()
     return this.deps.loadAccount()!
   }
 
@@ -141,11 +167,11 @@ export class RiotStoreProvider implements StoreProvider {
     if (r.status === 429) throw new Error('Riot認証サーバーのレート制限中です。しばらく待ってから再試行されます。')
     const newJar = applySetCookies(jar, r.setCookies)
     const t = r.location ? parseTokenRedirect(r.location) : null
-    if (!t) {
-      this.authBroken = true
-      throw new RiotAuthRequiredError()
-    }
-    return { jar: newJar, ...t }
+    if (t) return { jar: newJar, ...t }
+    // Riot answered "please log in" (redirect to the login page, or the login page itself)
+    const askedForLogin = (r.status >= 300 && r.status < 400 && !!r.location) || r.status === 200
+    if (!askedForLogin) throw new Error(`Riot認証サーバーが一時的に応答しません (HTTP ${r.status})。時間をおいて再試行します。`)
+    throw new RiotAuthRequiredError()
   }
 
   /** Builds a session from an access token: entitlements, account info and region. */
@@ -190,10 +216,35 @@ export class RiotStoreProvider implements StoreProvider {
     if (this.authBroken) throw new RiotAuthRequiredError()
     const jar = this.deps.loadCookies()
     if (!jar?.ssid) throw new RiotAuthRequiredError('Riotにログインしていません。設定画面からログインしてください。')
-    const r = await this.reauthWith(jar)
-    this.deps.saveCookies(r.jar) // Riot may rotate the ssid cookie
-    await this.establish(r.accessToken, r.idToken, r.expiresIn)
+    try {
+      const r = await this.reauthWith(jar)
+      this.deps.saveCookies(r.jar) // Riot may rotate the ssid cookie
+      await this.establish(r.accessToken, r.idToken, r.expiresIn)
+    } catch (e) {
+      if (!(e instanceof RiotAuthRequiredError)) throw e
+      // cookie expired → try Riot's own remembered browser session before bothering the user
+      if (!(await this.trySilentRelogin())) {
+        this.authBroken = true
+        throw e
+      }
+    }
+    this.lastAuthOkAt = this.now()
     return this.session!
+  }
+
+  private async trySilentRelogin(): Promise<boolean> {
+    if (!this.deps.silentRelogin || this.now() - this.lastSilentAt < 30 * 60_000) return false
+    this.lastSilentAt = this.now()
+    try {
+      const res = await this.deps.silentRelogin()
+      const t = res ? parseTokenRedirect(res.redirectUrl) : null
+      if (!res || !t || !res.cookies.ssid) return false
+      this.deps.saveCookies(res.cookies)
+      await this.establish(t.accessToken, t.idToken, t.expiresIn)
+      return true
+    } catch {
+      return false
+    }
   }
 
   private region(): string {

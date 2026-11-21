@@ -17,7 +17,10 @@ export interface AppState {
     supportsAutomatic: boolean
     usesUnofficialRiotApi: boolean
     status: { ready: boolean; message: string; accountLabel?: string | null }
+    ready: boolean
   }
+  fetchError: { message: string | null; at: string } | null
+  update: UpdateState | null
   latestStore: StoredSnapshot | null
   latestIsCurrent: boolean
   matchedSkinIds: string[]
@@ -27,6 +30,16 @@ export interface AppState {
   riot: { loggedIn: boolean; needsRelogin: boolean; account: { puuid: string; gameName: string | null; region: string | null } | null }
   secureStorageAvailable: boolean
   lastRun: CheckRun | null
+}
+
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | 'unsupported'
+  currentVersion: string
+  version: string | null
+  releaseNotes: string | null
+  progress: number | null
+  error: string | null
+  checkedAt: string | null
 }
 
 export interface CheckSummary {
@@ -68,8 +81,6 @@ interface VswApi {
   }
   store: {
     checkNow(): Promise<CheckSummary>
-    importJson(text: string): Promise<CheckSummary>
-    importPicked(picks: Array<{ skinId: string; price: number | null }>, date?: string): Promise<CheckSummary>
   }
   history(): Promise<HistoryData>
   settings: { update(patch: Partial<Settings>): Promise<Settings> }
@@ -78,7 +89,7 @@ interface VswApi {
   diagnostics(): Promise<Diagnostics>
   openExternal(url: string): Promise<void>
   openLogs(): Promise<void>
-  pickJsonFile(): Promise<string | null>
+  update: { check(): Promise<UpdateState>; download(): Promise<UpdateState>; install(): Promise<void> }
   riot: {
     login(): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>
     loginWithSsid(ssid: string): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>

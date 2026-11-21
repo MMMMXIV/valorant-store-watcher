@@ -17,9 +17,7 @@ const api = {
     reorder: (ids: string[]) => invoke('wishlist:reorder', { ids })
   },
   store: {
-    checkNow: () => invoke('store:checkNow'),
-    importJson: (text: string) => invoke('store:importJson', { text }),
-    importPicked: (picks: Array<{ skinId: string; price: number | null }>, date?: string) => invoke('store:importPicked', { picks, date })
+    checkNow: () => invoke('store:checkNow')
   },
   history: () => invoke('history:get'),
   settings: { update: (patch: Record<string, unknown>) => invoke('settings:update', patch) },
@@ -32,7 +30,11 @@ const api = {
   diagnostics: () => invoke('diagnostics:get'),
   openExternal: (url: string) => invoke('app:openExternal', { url }),
   openLogs: () => invoke('app:openLogs'),
-  pickJsonFile: () => invoke('dialog:pickJsonFile'),
+  update: {
+    check: () => invoke('update:check'),
+    download: () => invoke('update:download'),
+    install: () => invoke('update:install')
+  },
   riot: {
     login: () => invoke('riot:login'),
     loginWithSsid: (ssid: string) => invoke('riot:loginWithSsid', { ssid }),

@@ -13,6 +13,19 @@ extraResources:
     to: .
     filter: ["*.png", "*.ico"]
 asar: true
+# Hardening: encrypt Chromium cookies (Riot login session) with DPAPI, disable ELECTRON_RUN_AS_NODE etc.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+# In-app updates (electron-updater) read latest.yml from GitHub Releases.
+publish:
+  provider: github
+  owner: MMMMXIV
+  repo: valorant-store-watcher
+  releaseType: release
 win:
   target:
     - target: nsis

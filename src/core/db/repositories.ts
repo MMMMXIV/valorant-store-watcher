@@ -328,8 +328,10 @@ export class StoreRepo {
     }))
   }
 
-  latest(): StoredSnapshot | null {
-    return this.list(1)[0] ?? null
+  latest(source?: string): StoredSnapshot | null {
+    if (!source) return this.list(1)[0] ?? null
+    const r = this.db.get<{ id: number }>('SELECT id FROM store_snapshots WHERE source = ? ORDER BY fetched_at DESC LIMIT 1', [source])
+    return r ? (this.list(500).find((s) => s.id === r.id) ?? null) : null
   }
 
   offers(snapshotId: number): ResolvedOffer[] {
@@ -470,6 +472,11 @@ export class RunRepo {
         notifiedCount: r.notified_count,
         message: r.message
       }))
+  }
+
+  /** Latest finished run for a provider (manual/auto/startup/retry). */
+  lastFor(provider: string): CheckRun | null {
+    return this.list(300).find((r) => r.provider === provider && r.status !== 'running') ?? null
   }
 
   /** Marks runs left 'running' by a crash as errors. */

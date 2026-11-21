@@ -15,11 +15,6 @@ export const IpcSchemas = {
   'wishlist:setPriority': z.object({ skinId: Uuid, priority: PrioritySchema }),
   'wishlist:reorder': z.object({ ids: z.array(Uuid).max(2000) }),
   'store:checkNow': z.undefined(),
-  'store:importJson': z.object({ text: z.string().min(2).max(500_000) }),
-  'store:importPicked': z.object({
-    picks: z.array(z.object({ skinId: Uuid, price: z.number().int().min(0).max(100000).nullable() })).min(1).max(8),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
-  }),
   'history:get': z.undefined(),
   'settings:update': SettingsPatchSchema,
   'webhook:set': z.object({ url: z.string().trim().max(300) }),
@@ -29,10 +24,12 @@ export const IpcSchemas = {
   'diagnostics:get': z.undefined(),
   'app:openExternal': z.object({ url: z.string().url().max(500) }),
   'app:openLogs': z.undefined(),
-  'dialog:pickJsonFile': z.undefined(),
   'riot:login': z.undefined(),
   'riot:loginWithSsid': z.object({ ssid: z.string().min(10).max(4096) }),
-  'riot:logout': z.undefined()
+  'riot:logout': z.undefined(),
+  'update:check': z.undefined(),
+  'update:download': z.undefined(),
+  'update:install': z.undefined()
 } as const
 
 export type IpcChannel = keyof typeof IpcSchemas

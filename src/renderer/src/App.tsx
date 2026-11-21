@@ -86,14 +86,14 @@ function Shell() {
 function MonitorFooter() {
   const { state } = useData()
   if (!state) return null
-  const active = state.schedulerRunning && state.settings.autoCheckEnabled && state.provider.supportsAutomatic
+  const active = state.schedulerRunning && state.settings.autoCheckEnabled && state.provider.ready
   return (
     <div className="m-3 border border-ink-700 bg-ink-900 p-3 text-xs">
       <div className="flex items-center gap-2">
         <span className={`relative inline-flex h-2.5 w-2.5 ${active ? 'bg-teal' : 'bg-ink-500'}`}>
           {active && <span className="absolute inset-0 animate-ping bg-teal/60" />}
         </span>
-        <span className="font-semibold">{state.checking ? 'チェック中…' : active ? '監視中' : state.paused ? '一時停止中' : '自動監視オフ'}</span>
+        <span className="font-semibold">{state.checking ? 'チェック中…' : active ? '監視中' : state.paused ? '一時停止中' : !state.provider.ready ? '要対応（取得準備未完了）' : '自動監視オフ'}</span>
       </div>
       {active && state.plan && (
         <div className="mt-1.5 text-mute">

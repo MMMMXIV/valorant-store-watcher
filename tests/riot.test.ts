@@ -24,7 +24,7 @@ interface FakeRiot {
   jar: { value: CookieJar | null }
   account: { value: RiotAccountInfo | null }
   clock: { now: number }
-  opts: { cookieValid: boolean; pasRegion: string; storeQueue: Array<{ status: number; body: unknown }>; offers: string[] }
+  opts: { cookieValid: boolean; authDown?: boolean; silent?: 'ok' | 'login' | null; pasRegion: string; storeQueue: Array<{ status: number; body: unknown }>; offers: string[] }
   lastStoreHeaders: Record<string, string> | null
 }
 
@@ -40,6 +40,7 @@ function fakeRiot(ack = true, regionSetting = 'auto'): FakeRiot {
   }
   const authorize: AuthorizeFn = async (_url, cookie) => {
     f.calls.push('authorize')
+    if (f.opts.authDown) return { status: 403, location: null, setCookies: [] } // e.g. Cloudflare / outage
     if (!f.opts.cookieValid || !cookie.includes('ssid=')) return { status: 303, location: 'https://auth.riotgames.com/login', setCookies: [] }
     const token = jwt(Math.floor(f.clock.now / 1000) + 3600)
     return {
@@ -80,6 +81,11 @@ function fakeRiot(ack = true, regionSetting = 'auto'): FakeRiot {
     getRegionSetting: () => regionSetting,
     getClientVersion: async () => 'release-13.10-shipping-18-5893614',
     riskAcknowledged: () => ack,
+    silentRelogin: async () => {
+      f.calls.push('silent')
+      if (f.opts.silent !== 'ok') return null
+      return { redirectUrl: `https://playvalorant.com/opt_in#access_token=${jwt(Math.floor(f.clock.now / 1000) + 3600)}&id_token=ID&expires_in=3600`, cookies: { ssid: 'SILENT_SSID_1234567890', tdid: 'dev' } }
+    },
     now: () => new Date(f.clock.now)
   })
   return f
@@ -195,6 +201,61 @@ describe('Riot provider (非公式)', () => {
     expect(core.repos.stores.latest()!.accountName).toBe('Tester#JP1')
     // scheduler uses the store's real refresh time
     expect(core.scheduler.plan()).toMatchObject({ reason: 'source-refresh' })
+  })
+})
+
+describe('再ログインの手間を減らす仕組み', () => {
+  it('a temporary auth-server error does NOT require re-login', async () => {
+    const f = fakeRiot()
+    await f.provider.loginWithSsid('ORIGINAL_SSID_VALUE_ABCDEFG')
+    f.opts.authDown = true
+    f.clock.now += 2 * 3600_000
+    await expect(f.provider.fetchStore(ctx)).rejects.toThrow(/一時的/)
+    expect(f.provider.needsRelogin).toBe(false)
+    expect(f.calls).not.toContain('silent')
+    f.opts.authDown = false
+    f.clock.now += 60_000
+    await expect(f.provider.fetchStore(ctx)).resolves.toMatchObject({ accountId: PUUID })
+  })
+
+  it('expired cookie → silent re-login with the remembered Riot session, no user action', async () => {
+    const f = fakeRiot()
+    await f.provider.loginWithSsid('ORIGINAL_SSID_VALUE_ABCDEFG')
+    f.opts.cookieValid = false
+    f.opts.silent = 'ok'
+    f.clock.now += 2 * 3600_000
+    await expect(f.provider.fetchStore(ctx)).resolves.toMatchObject({ accountId: PUUID })
+    expect(f.calls).toContain('silent')
+    expect(f.provider.needsRelogin).toBe(false)
+    expect(f.jar.value).toMatchObject({ ssid: 'SILENT_SSID_1234567890' })
+  })
+
+  it('silent re-login impossible → needs re-login, and the scheduler stops', async () => {
+    const { core } = await createTestApp()
+    const f = fakeRiot()
+    core.registerProvider(f.provider)
+    core.repos.settings.update({ providerId: 'riot' })
+    await f.provider.loginWithSsid('ORIGINAL_SSID_VALUE_ABCDEFG')
+    expect(core.scheduler.plan()).not.toBeNull()
+    f.opts.cookieValid = false
+    f.opts.silent = 'login'
+    f.clock.now += 2 * 3600_000
+    await expect(f.provider.fetchStore(ctx)).rejects.toBeInstanceOf(RiotAuthRequiredError)
+    expect(f.provider.needsRelogin).toBe(true)
+    expect(core.scheduler.plan()).toBeNull() // no pointless retries / no mock fallback
+  })
+
+  it('keepAlive refreshes the session only when it is older than 12h', async () => {
+    const f = fakeRiot()
+    await f.provider.loginWithSsid('ORIGINAL_SSID_VALUE_ABCDEFG')
+    const auths = () => f.calls.filter((c) => c === 'authorize').length
+    const n = auths()
+    f.clock.now += 3 * 3600_000
+    expect(await f.provider.keepAlive()).toBe(false)
+    f.clock.now += 10 * 3600_000
+    expect(await f.provider.keepAlive()).toBe(true)
+    expect(auths()).toBe(n + 1)
+    expect(f.jar.value!.ssid).toBe('ROTATED_SSID_VALUE_1234567890')
   })
 })
 

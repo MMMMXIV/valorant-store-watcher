@@ -289,11 +289,25 @@ describe('10. ストア取得エラーからの復旧（Mock + スケジュー�
     expect(core.repos.runs.list().map((r) => r.status)).toEqual(['success', 'success', 'error'])
   })
 
-  it('manual provider does not run automatically', async () => {
+  it('defaults to the Riot source and never falls back to the mock store', async () => {
     const { core } = await createTestApp()
-    core.repos.settings.update({ providerId: 'manual' })
+    expect(core.repos.settings.get().providerId).toBe('riot')
+    expect(core.provider.id).toBe('riot')
+    // Riot is not set up (headless placeholder) → scheduler stays idle instead of using Mock
     expect(core.scheduler.plan()).toBeNull()
     expect(await core.scheduler.tick()).toBe(false)
+    expect(core.mock.calls).toBe(0)
+    const r = await core.checkService.runCheck('manual')
+    expect(r.status).toBe('error')
+    expect(core.mock.calls).toBe(0)
+    expect(core.repos.runs.lastFor('riot')).toMatchObject({ status: 'error' })
+    expect(core.repos.stores.latest('riot')).toBeNull()
+  })
+
+  it('migrates legacy v1.0 manual sources to riot (not mock)', async () => {
+    const { core } = await createTestApp()
+    core.repos.db.run("INSERT OR REPLACE INTO settings(key, value) VALUES ('providerId', '\"manual-file\"')")
+    expect(core.repos.settings.get().providerId).toBe('riot')
   })
 })
 

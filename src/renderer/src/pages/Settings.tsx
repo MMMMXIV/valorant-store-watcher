@@ -33,6 +33,7 @@ export function SettingsPage() {
         <div className="space-y-5">
           <WebhookCard />
           <NotifyCard s={s} save={save} />
+          <UpdateCard />
           <WindowsCard s={s} save={save} />
           <CatalogCard />
         </div>
@@ -151,6 +152,12 @@ function RiotCard({ s, save }: { s: Settings; save: SaveFn }) {
       <p className="mt-2 text-xs leading-relaxed text-mute">
         別ウィンドウでRiot公式のログインページ（auth.riotgames.com）が開きます。ウィンドウのタイトルでアドレスを確認できます。2段階認証のコードもそのページに入力してください。
       </p>
+      <Notice tone="teal" title="再ログインを減らすコツ">
+        Riotのログイン画面で<strong>「ログイン状態を保持する（Stay signed in）」にチェック</strong>を入れてください。
+        アプリはログイン状態を自動で更新し続け、期限が切れても保存済みのRiotセッションで<strong>自動的に再ログイン</strong>を試みます。
+        それでもRiotがパスワードを求めたときだけ、通知でお知らせします（通知をクリックするとログイン画面が開きます）。
+        通知方法や設定の変更、アプリの再起動・アップデートで再ログインが必要になることはありません。
+      </Notice>
       <label className="mt-3 block text-xs text-mute">
         地域
         <select className={`${inputCls} mt-1`} value={s.riotRegion} onChange={(e) => void save({ riotRegion: e.target.value as Settings['riotRegion'] })}>
@@ -206,17 +213,10 @@ function ProviderCard({ s, save }: { s: Settings; save: SaveFn }) {
     {
       id: 'riot',
       title: 'Riotアカウント（非公式・自分のストア）',
-      desc: s.riskAcknowledged ? 'ログインしたアカウントの実際のデイリーストアを毎日自動で取得します。' : '上の「Riotアカウント連携」でリスクに同意すると選べます。',
-      disabled: !s.riskAcknowledged
+      desc: 'ログインしたアカウントの実際のデイリーストアを毎日自動で取得します（上の「Riotアカウント連携」でリスク同意とログインが必要）。'
     },
-    { id: 'mock', title: 'テスト用ストア（Mock）', desc: 'カタログから毎日ランダムな4スキンを生成します。通知の動作確認用。自動チェック対応。' },
-    { id: 'manual', title: '手動取り込み', desc: 'ゲーム内で見たストアをダッシュボードから入力・貼り付け。自動チェックなし。' },
-    { id: 'manual-file', title: 'JSONファイル監視', desc: '指定したJSONファイルを定時に読み込みます。ファイルは自分で用意します（形式はREADME参照）。自動チェック対応。' }
+    { id: 'mock', title: 'テスト用ストア（Mock）', desc: '毎日ランダムな4スキンの疑似ストアを生成します。通知の動作確認用です。実際のストアではありません。' }
   ]
-  const pick = async () => {
-    const p = await api().pickJsonFile()
-    if (p) await save({ manualFilePath: p }, 'ファイルを設定しました')
-  }
   return (
     <Card title="ストア取得方法">
       <div className="space-y-2">
@@ -231,7 +231,7 @@ function ProviderCard({ s, save }: { s: Settings; save: SaveFn }) {
         ))}
       </div>
       <div className="mt-3 text-xs text-mute">
-        状態: <span className={state?.provider.status.ready ? 'text-teal' : 'text-amber'}>{state?.provider.status.message}</span>
+        状態: <span className={state?.provider.ready ? 'text-teal' : 'text-amber'}>{state?.provider.status.message}</span>
       </div>
       {s.providerId === 'mock' && (
         <div className="mt-3 border-t border-ink-700 pt-2">
@@ -243,14 +243,7 @@ function ProviderCard({ s, save }: { s: Settings; save: SaveFn }) {
           />
         </div>
       )}
-      {s.providerId === 'manual-file' && (
-        <div className="mt-3 flex items-center gap-2">
-          <input className={inputCls} readOnly value={s.manualFilePath ?? ''} placeholder="ファイル未選択" />
-          <Button variant="outline" onClick={() => void pick()}>
-            選択
-          </Button>
-        </div>
-      )}
+      <p className="mt-2 text-[11px] text-ink-500">取得に失敗しても、テスト用ストアに自動で切り替わることはありません（エラーはダッシュボードに表示されます）。</p>
     </Card>
   )
 }
@@ -383,6 +376,57 @@ function WindowsCard({ s, save }: { s: Settings; save: SaveFn }) {
       <Toggle checked={s.launchAtLogin} onChange={(v) => void save({ launchAtLogin: v })} label="Windowsログイン時に自動起動" description="ログイン時にトレイで起動し、監視を始めます" />
       <Toggle checked={s.startHidden} onChange={(v) => void save({ startHidden: v })} label="自動起動時はウィンドウを表示しない" />
       <Toggle checked={s.closeToTray} onChange={(v) => void save({ closeToTray: v })} label="ウィンドウを閉じてもトレイで監視を続ける" description="完全に終了するにはトレイアイコンを右クリック →「終了」" />
+    </Card>
+  )
+}
+
+function UpdateCard() {
+  const { state } = useData()
+  const toast = useToast()
+  const u = state?.update
+  const run = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn()
+    } catch (e) {
+      toast('err', errText(e))
+    }
+  }
+  const label: Record<string, string> = {
+    idle: '未確認',
+    checking: '確認中…',
+    available: `新しいバージョン v${u?.version} があります`,
+    'not-available': '最新バージョンです',
+    downloading: `ダウンロード中… ${u?.progress ?? 0}%`,
+    downloaded: `v${u?.version} の準備ができました`,
+    error: 'エラー',
+    unsupported: '開発版では利用できません'
+  }
+  return (
+    <Card title="アップデート" action={<span className="text-xs text-mute">現在 v{state?.version}</span>}>
+      <div className="flex items-center gap-2 text-sm">
+        {u?.status === 'available' || u?.status === 'downloaded' ? <Badge tone="teal">{label[u.status]}</Badge> : <span>{u ? label[u.status] : '—'}</span>}
+      </div>
+      {u?.status === 'downloading' && (
+        <div className="mt-3 h-1.5 bg-ink-700">
+          <div className="h-full bg-crimson transition-all" style={{ width: `${u.progress ?? 0}%` }} />
+        </div>
+      )}
+      {u?.error && <div className="mt-2 text-xs text-crimson">{u.error}</div>}
+      {u?.releaseNotes && (u.status === 'available' || u.status === 'downloaded') && (
+        <pre className="mt-3 max-h-32 overflow-auto whitespace-pre-wrap bg-ink-950 p-3 text-[11px] text-bone/80">{u.releaseNotes}</pre>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {u?.status === 'available' ? (
+          <Button onClick={() => void run(() => api().update.download())}>ダウンロード</Button>
+        ) : u?.status === 'downloaded' ? (
+          <Button onClick={() => void run(() => api().update.install())}>再起動して更新</Button>
+        ) : (
+          <Button variant="outline" busy={u?.status === 'checking'} disabled={u?.status === 'unsupported' || u?.status === 'downloading'} onClick={() => void run(() => api().update.check())}>
+            更新を確認
+          </Button>
+        )}
+      </div>
+      <p className="mt-2 text-xs text-mute">起動時と12時間ごとに自動で確認します。更新してもウィッシュリスト・履歴・ログイン状態・設定はそのまま引き継がれます。</p>
     </Card>
   )
 }

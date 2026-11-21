@@ -1,11 +1,12 @@
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from 'electron'
-import { WatcherCore, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, parseStoreImport, snapshotFromPicked, formatZonedDateTime, type CheckPlan } from '../core'
+import { WatcherCore, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan } from '../core'
 import { matchWishlist } from '../core/monitor/matcher'
 import { IpcSchemas, type IpcChannel } from './ipcSchemas'
 import { Logger } from './logger'
 import { SecretStore } from './secrets'
-import { electronAuthorize, openRiotLoginWindow, wipeRiotSessions } from './riotAuth'
+import { electronAuthorize, openRiotLoginWindow, silentRiotLogin, wipeRiotSessions } from './riotAuth'
+import { AppUpdater } from './updater'
 
 const WEBHOOK_KEY = 'discord.webhook'
 const RIOT_COOKIES_KEY = 'riot.cookies'
@@ -24,6 +25,9 @@ let catalogTimer: NodeJS.Timeout | null = null
 let trayHintShown = false
 let riot: RiotStoreProvider
 let reloginNotified = false
+let updater: AppUpdater
+let keepAliveTimer: NodeJS.Timeout | null = null
+let loginInProgress: Promise<unknown> | null = null
 
 app.setAppUserModelId('com.vsw.valorant-store-watcher')
 // Optional override (portable use / automated UI tests)
@@ -62,7 +66,9 @@ async function bootstrap(): Promise<void> {
     onChange: () => {
       if (riot?.needsRelogin && !reloginNotified && Notification.isSupported()) {
         reloginNotified = true
-        new Notification({ title: 'VALORANT Store Watcher', body: 'Riotへの再ログインが必要です。アプリの設定画面からログインしてください。' }).show()
+        const n = new Notification({ title: 'VALORANT Store Watcher', body: 'Riotへの再ログインが必要です。ここをクリックするとログイン画面を開きます。' })
+        n.on('click', () => void startRiotLogin().catch((e) => logger.warn('再ログイン失敗', e)))
+        n.show()
       }
       broadcast()
     },
@@ -75,20 +81,19 @@ async function bootstrap(): Promise<void> {
   riot = new RiotStoreProvider({
     fetchImpl: (url, init) => net.fetch(url, init),
     authorize: electronAuthorize,
-    loadCookies: () => {
-      const raw = secrets.get(RIOT_COOKIES_KEY)
-      try {
-        return raw ? (JSON.parse(raw) as Record<string, string>) : null
-      } catch {
-        return null
-      }
-    },
+    loadCookies: loadRiotCookies,
     saveCookies: (jar) => secrets.set(RIOT_COOKIES_KEY, JSON.stringify(jar)),
     loadAccount: () => core.loadRiotAccount(),
     saveAccount: (a) => core.saveRiotAccount(a),
     getRegionSetting: () => core.repos.settings.get().riotRegion,
     getClientVersion: () => core.riotClientVersion(),
-    riskAcknowledged: () => core.repos.settings.get().riskAcknowledged
+    riskAcknowledged: () => core.repos.settings.get().riskAcknowledged,
+    silentRelogin: async () => {
+      logger.info('保存済みのRiotセッションでの自動再ログインを試みます')
+      const r = await silentRiotLogin(loadRiotCookies())
+      logger.info(r ? '自動再ログインに成功しました' : '自動再ログインできませんでした（手動ログインが必要）')
+      return r
+    }
   })
   core.registerProvider(riot)
 
@@ -106,6 +111,28 @@ async function bootstrap(): Promise<void> {
   catalogTimer = setInterval(() => void refreshCatalog(false), 6 * 3600_000)
 
   if (!paused) core.scheduler.start()
+
+  // keep the Riot session fresh so the saved login lasts as long as possible
+  const keepAlive = () =>
+    void riot
+      .keepAlive()
+      .then((did) => did && logger.info('Riotセッションを更新しました'))
+      .catch((e) => logger.warn('Riotセッションの更新に失敗', e))
+      .finally(() => broadcast())
+  keepAliveTimer = setInterval(keepAlive, 3600_000)
+  setTimeout(keepAlive, 90_000)
+
+  // in-app updates
+  updater = new AppUpdater(logger, (st) => {
+    broadcast()
+    if (st.status === 'available' && Notification.isSupported()) {
+      const n = new Notification({ title: 'VALORANT Store Watcher', body: `新しいバージョン v${st.version} があります。クリックして更新できます。` })
+      n.on('click', () => showWindow())
+      n.show()
+    }
+  })
+  setTimeout(() => void updater.check(), 30_000)
+  setInterval(() => void updater.check(), 12 * 3600_000)
   powerMonitor.on('resume', () => {
     logger.info('スリープから復帰: ストアを確認します')
     void core.scheduler.tick('startup')
@@ -195,7 +222,8 @@ function monitorLabel(): string {
   if (paused) return '⏸ 監視一時停止中'
   const s = core.repos.settings.get()
   if (!s.autoCheckEnabled) return '⏹ 自動チェック無効'
-  if (!core.provider.supportsAutomatic) return '✋ 手動取り込みモード'
+  if (core.provider.id === 'riot' && riot?.needsRelogin) return '⚠ Riotへの再ログインが必要'
+  if (core.provider.canRunAutomatically && !core.provider.canRunAutomatically()) return '⚠ 取得の準備ができていません'
   if (core.checkService.isRunning) return '🔄 チェック中…'
   if (lastPlan) return `🟢 監視中（次回 ${formatZonedDateTime(lastPlan.dueAt, s.timezone)}）`
   return '🟢 監視中'
@@ -218,6 +246,9 @@ function updateTray(): void {
       { type: 'separator' },
       { label: 'アプリを開く', click: () => showWindow() },
       { label: '今すぐチェック', click: () => void core.checkService.runCheck('manual') },
+      ...(riot?.needsRelogin || (core.repos.settings.get().providerId === 'riot' && riot && !riot.loggedIn && core.repos.settings.get().riskAcknowledged)
+        ? [{ label: '⚠ Riotにログイン', click: () => void startRiotLogin().catch((e) => logger.warn('ログイン失敗', e)) }]
+        : []),
       { label: paused ? '監視を再開' : '監視を一時停止', click: () => setPaused(!paused) },
       { type: 'separator' },
       {
@@ -261,7 +292,9 @@ function broadcast(): void {
 async function buildState() {
   const settings = core.repos.settings.get()
   const provider = core.provider
-  const latest = core.repos.stores.latest()
+  const latest = core.repos.stores.latest(provider.id)
+  const lastRun = core.repos.runs.lastFor(provider.id)
+  const status = await provider.status(core.checkService.providerContext())
   const wishlist = core.repos.wishlist.list()
   const matches = latest ? matchWishlist(latest.offers, wishlist) : []
   const plan = core.scheduler.plan()
@@ -278,8 +311,12 @@ async function buildState() {
       name: provider.displayName,
       supportsAutomatic: provider.supportsAutomatic,
       usesUnofficialRiotApi: provider.usesUnofficialRiotApi,
-      status: await provider.status(core.checkService.providerContext())
+      status,
+      ready: status.ready && (provider.canRunAutomatically?.() ?? true)
     },
+    // the latest check of the CURRENT source failed → shown instead of a stale store
+    fetchError: lastRun?.status === 'error' ? { message: lastRun.message, at: lastRun.finishedAt ?? lastRun.startedAt } : null,
+    update: updater?.state ?? null,
     latestStore: latest,
     latestIsCurrent: !!latest?.periodEnd && new Date(latest.periodEnd).getTime() > Date.now(),
     matchedSkinIds: matches.map((m) => m.offer.skinId),
@@ -288,7 +325,7 @@ async function buildState() {
     webhookConfigured: secrets.has(WEBHOOK_KEY),
     riot: { loggedIn: riot.loggedIn, needsRelogin: riot.needsRelogin, account: core.loadRiotAccount() },
     secureStorageAvailable: secrets.available(),
-    lastRun: core.repos.runs.list(1)[0] ?? null
+    lastRun
   }
 }
 
@@ -338,11 +375,8 @@ function registerIpc(): void {
     if (last && last.trigger === 'manual' && Date.now() - new Date(last.startedAt).getTime() < 30_000) {
       throw new Error('連続チェックを防ぐため、30秒ほど待ってから再実行してください')
     }
-    if (!core.provider.supportsAutomatic) throw new Error('現在の取得方法では自動取得できません。「ストアを手動入力」を使ってください。')
     return summarize(await core.checkService.runCheck('manual'))
   })
-  handle('store:importJson', async ({ text }) => summarize(await core.checkService.runCheck('import', parseStoreImport(text, new Date()))))
-  handle('store:importPicked', async ({ picks, date }) => summarize(await core.checkService.runCheck('import', snapshotFromPicked(picks, new Date(), date))))
   handle('history:get', () => ({
     snapshots: core.repos.stores.list(60),
     stats: core.repos.stores.appearanceStats(200),
@@ -351,10 +385,6 @@ function registerIpc(): void {
     errors: core.repos.errors.list(200)
   }))
   handle('settings:update', (patch) => {
-    if (patch.providerId === 'riot' && !(patch.riskAcknowledged ?? core.repos.settings.get().riskAcknowledged)) {
-      throw new Error('Riotアカウント方式を使うには、先にリスクの確認が必要です')
-    }
-    if (patch.riskAcknowledged === false && core.repos.settings.get().providerId === 'riot') patch = { ...patch, providerId: 'mock' }
     const s = core.repos.settings.update(patch)
     if (patch.launchAtLogin !== undefined) applyLoginItem(s.launchAtLogin)
     void core.scheduler.tick()
@@ -378,7 +408,7 @@ function registerIpc(): void {
     if (url && !isValidWebhookUrl(url)) throw new Error('Discord Webhook URLの形式ではありません')
     return core.checkService.sendTest(url || undefined)
   })
-  const afterLogin = async (who: string) => {
+  afterLoginFn = async (who: string) => {
     reloginNotified = false
     core.repos.monitor.set({ consecutiveFailures: 0, lastError: null, lastErrorAt: null, lastPeriodEnd: null, lastSuccessAt: null })
     core.repos.settings.update({ providerId: 'riot' })
@@ -388,19 +418,14 @@ function registerIpc(): void {
     const r = await core.checkService.runCheck('manual')
     return { account: core.loadRiotAccount(), check: summarize(r) }
   }
-  handle('riot:login', async () => {
-    if (!core.repos.settings.get().riskAcknowledged) throw new Error('先にリスクの確認をしてください')
-    const { redirectUrl, cookies } = await openRiotLoginWindow(mainWindow)
-    const a = await riot.completeLogin(redirectUrl, cookies)
-    return afterLogin(a.gameName ?? 'アカウント')
-  })
+  handle('riot:login', () => startRiotLogin())
   handle('riot:loginWithSsid', async ({ ssid }) => {
     if (!core.repos.settings.get().riskAcknowledged) throw new Error('先にリスクの確認をしてください')
     const v = parseSsidInput(ssid)
     if (!v) throw new Error('ssid の形式が正しくありません')
     try {
       const a = await riot.loginWithSsid(v)
-      return afterLogin(a.gameName ?? 'アカウント')
+      return afterLoginFn(a.gameName ?? 'アカウント')
     } catch (e) {
       if (e instanceof RiotAuthRequiredError) throw new Error('この ssid ではログインできませんでした（期限切れか、値が違います）')
       throw e
@@ -411,7 +436,6 @@ function registerIpc(): void {
     core.saveRiotAccount(null)
     riot.reset()
     await wipeRiotSessions()
-    if (core.repos.settings.get().providerId === 'riot') core.repos.settings.update({ providerId: 'manual' })
     logger.info('Riot連携を解除し、認証情報を破棄しました')
     broadcast()
     return true
@@ -428,12 +452,38 @@ function registerIpc(): void {
     logs: logger.tail(300),
     loginItem: process.platform === 'win32' || process.platform === 'darwin' ? app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin : false
   }))
+  handle('update:check', () => updater.check())
+  handle('update:download', () => updater.download())
+  handle('update:install', () => {
+    quitting = true
+    updater.install()
+  })
   handle('app:openExternal', ({ url }) => openExternalSafe(url))
   handle('app:openLogs', () => shell.openPath(path.dirname(logger.file)))
-  handle('dialog:pickJsonFile', async () => {
-    const r = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] })
-    return r.canceled ? null : r.filePaths[0]
-  })
+}
+
+function loadRiotCookies(): Record<string, string> | null {
+  const raw = secrets.get(RIOT_COOKIES_KEY)
+  try {
+    return raw ? (JSON.parse(raw) as Record<string, string>) : null
+  } catch {
+    return null
+  }
+}
+
+let afterLoginFn: (who: string) => Promise<unknown> = async () => undefined
+
+/** Opens the Riot login window (one at a time). If Riot remembers the session it completes instantly. */
+function startRiotLogin(): Promise<unknown> {
+  if (!core.repos.settings.get().riskAcknowledged) return Promise.reject(new Error('先にリスクの確認をしてください'))
+  if (loginInProgress) return loginInProgress
+  showWindow()
+  loginInProgress = (async () => {
+    const { redirectUrl, cookies } = await openRiotLoginWindow(mainWindow, loadRiotCookies())
+    const a = await riot.completeLogin(redirectUrl, cookies)
+    return afterLoginFn(a.gameName ?? 'アカウント')
+  })().finally(() => (loginInProgress = null))
+  return loginInProgress
 }
 
 function summarize(r: Awaited<ReturnType<WatcherCore['checkService']['runCheck']>>) {
@@ -443,6 +493,7 @@ function summarize(r: Awaited<ReturnType<WatcherCore['checkService']['runCheck']
 app.on('before-quit', () => {
   quitting = true
   if (catalogTimer) clearInterval(catalogTimer)
+  if (keepAliveTimer) clearInterval(keepAliveTimer)
   try {
     core?.close()
   } catch (e) {
