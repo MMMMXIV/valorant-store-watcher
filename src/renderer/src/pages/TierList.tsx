@@ -65,7 +65,7 @@ export function TierList() {
   const placed = useMemo(() => new Set(tiers.flatMap((t) => t.skinIds)), [tiers])
   const results = useMemo(() => {
     const r = searchSkinsUi(skins, q, weapon)
-    return r.slice(0, 60)
+    return r.slice(0, 300)
   }, [skins, q, weapon])
 
   const move = (skinId: string, toTierId: string | null) => {
@@ -127,43 +127,45 @@ export function TierList() {
 
   return (
     <DndContext sensors={sensors} onDragStart={(e: DragStartEvent) => setDragId(String(e.active.id))} onDragEnd={onDragEnd} onDragCancel={() => setDragId(null)}>
-      <div className="space-y-5">
-        <PageHeader
-          title="Tier表メーカー"
-          sub="TIER LIST"
-          right={
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={clearAll}>
-                すべて外す
-              </Button>
-              <Button variant="outline" busy={busy === 'copy'} onClick={() => void exportImg('copy')}>
-                画像をコピー
-              </Button>
-              <Button variant="outline" busy={busy === 'save'} onClick={() => void exportImg('save')}>
-                画像を保存
-              </Button>
-              <Button busy={busy === 'sharex'} onClick={() => void exportImg('sharex')}>
-                <XLogo /> でシェア
-              </Button>
-            </div>
-          }
-        />
-
-        <div className="flex items-center gap-3">
-          <label className="text-xs text-mute">タイトル</label>
-          <input className={`${inputCls} max-w-md`} value={title} maxLength={60} onChange={(e) => setTitle(e.target.value)} placeholder="例: 俺の好きなヴァンダルスキン" />
+      <div className="flex h-full flex-col gap-4 px-8 py-6">
+        {/* fixed top: header, title, tier board */}
+        <div className="flex-none">
+          <PageHeader
+            title="Tier表メーカー"
+            sub="TIER LIST"
+            right={
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={clearAll}>
+                  すべて外す
+                </Button>
+                <Button variant="outline" busy={busy === 'copy'} onClick={() => void exportImg('copy')}>
+                  画像をコピー
+                </Button>
+                <Button variant="outline" busy={busy === 'save'} onClick={() => void exportImg('save')}>
+                  画像を保存
+                </Button>
+                <Button busy={busy === 'sharex'} onClick={() => void exportImg('sharex')}>
+                  <XLogo /> でシェア
+                </Button>
+              </div>
+            }
+          />
+          <div className="mt-3 flex items-center gap-3">
+            <label className="text-xs text-mute">タイトル</label>
+            <input className={`${inputCls} max-w-md`} value={title} maxLength={60} onChange={(e) => setTitle(e.target.value)} placeholder="例: 俺の好きなヴァンダルスキン" />
+          </div>
         </div>
 
-        {/* tiers */}
-        <div className="border border-ink-700">
+        {/* tier board — stays visible; scrolls inside itself only if very tall */}
+        <div className="flex-none overflow-y-auto border border-ink-700" style={{ maxHeight: '52vh' }}>
           {tiers.map((t) => (
             <TierRow key={t.id} tier={t} skins={t.skinIds.map((id) => byId.get(id)).filter(Boolean) as CatalogSkin[]} onRemove={(id) => move(id, null)} onColor={(c) => setTiers((p) => p.map((x) => (x.id === t.id ? { ...x, color: c } : x)))} onLabel={(l) => setTiers((p) => p.map((x) => (x.id === t.id ? { ...x, label: l } : x)))} />
           ))}
         </div>
 
-        {/* catalog pool */}
+        {/* catalog pool — the only part that scrolls freely */}
         <PoolArea>
-          <div className="mb-3 flex flex-wrap gap-3">
+          <div className="mb-3 flex flex-none flex-wrap gap-3">
             <div className="relative min-w-60 flex-1">
               <IconSearch className="absolute left-3 top-2.5 text-mute" />
               <input className={`${inputCls} pl-10`} placeholder="スキンを検索してTierにドラッグ（日本語・英語）" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -177,12 +179,14 @@ export function TierList() {
               ))}
             </select>
           </div>
-          <p className="mb-3 text-xs text-mute">カードをつかんで上のTierにドラッグすると追加できます。Tierのスキンをここに戻すと外せます。</p>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2">
-            {results.map((s) => (
-              <DraggableSkin key={s.id} skin={s} from="pool" placed={placed.has(s.id)} />
-            ))}
-            {!results.length && <div className="col-span-full py-6 text-center text-sm text-mute">検索結果がありません</div>}
+          <p className="mb-2 flex-none text-xs text-mute">カードをつかんで上のTierにドラッグすると追加できます（この一覧だけがスクロールします）。Tierのスキンをここに戻すと外せます。</p>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 pb-2">
+              {results.map((s) => (
+                <DraggableSkin key={s.id} skin={s} from="pool" placed={placed.has(s.id)} />
+              ))}
+              {!results.length && <div className="col-span-full py-6 text-center text-sm text-mute">検索結果がありません</div>}
+            </div>
           </div>
         </PoolArea>
       </div>
@@ -213,7 +217,7 @@ function TierRow({ tier, skins, onRemove, onColor, onLabel }: { tier: Tier; skin
 function PoolArea({ children }: { children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'pool' })
   return (
-    <section ref={setNodeRef} className={`border p-4 ${isOver ? 'border-crimson bg-crimson/5' : 'border-ink-700 bg-ink-850'}`}>
+    <section ref={setNodeRef} className={`flex min-h-0 flex-1 flex-col border p-4 ${isOver ? 'border-crimson bg-crimson/5' : 'border-ink-700 bg-ink-850'}`}>
       {children}
     </section>
   )

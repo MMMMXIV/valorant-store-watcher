@@ -64,24 +64,29 @@ function Shell() {
         </nav>
         <MonitorFooter />
       </aside>
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1400px] px-8 py-7">
-          {!state ? (
-            <div className="py-24 text-center text-mute">読み込み中…</div>
-          ) : page === 'dashboard' ? (
-            <Dashboard go={setPage} />
-          ) : page === 'catalog' ? (
-            <Catalog />
-          ) : page === 'wishlist' ? (
-            <Wishlist go={setPage} />
-          ) : page === 'tier' ? (
+      <main className={`min-w-0 flex-1 ${page === 'tier' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        {page === 'tier' && state ? (
+          // Tier page uses a fixed two-pane layout (tiers pinned, catalog scrolls on its own)
+          <div className="mx-auto h-full max-w-[1400px]">
             <TierList />
-          ) : page === 'history' ? (
-            <History />
-          ) : (
-            <SettingsPage />
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-[1400px] px-8 py-7">
+            {!state ? (
+              <div className="py-24 text-center text-mute">読み込み中…</div>
+            ) : page === 'dashboard' ? (
+              <Dashboard go={setPage} />
+            ) : page === 'catalog' ? (
+              <Catalog />
+            ) : page === 'wishlist' ? (
+              <Wishlist go={setPage} />
+            ) : page === 'history' ? (
+              <History />
+            ) : (
+              <SettingsPage />
+            )}
+          </div>
+        )}
       </main>
     </div>
   )
