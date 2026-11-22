@@ -10,3 +10,4 @@ release/
 secrets.json
 coverage/
 *.tsbuildinfo
+site/
