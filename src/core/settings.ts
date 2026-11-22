@@ -20,6 +20,10 @@ export const SettingsSchema = z.object({
   /** Windows desktop (toast) notifications, independent from Discord. */
   desktopNotifyWishlist: z.boolean().default(true),
   desktopNotifyStore: z.boolean().default(false),
+  /** Notify when the featured bundle rotates (Discord + Windows). */
+  notifyBundle: z.boolean().default(true),
+  /** Notify when the Night Market opens (Discord + Windows). */
+  notifyNightMarket: z.boolean().default(true),
   /** Discord user ID that receives BOT DMs (not secret). */
   discordUserId: z.string().regex(/^\d{15,21}$/).nullable().default(null),
   notifyWishlist: z.boolean().default(true),

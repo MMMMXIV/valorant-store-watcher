@@ -108,6 +108,7 @@ interface VswApi {
   diagnostics(): Promise<Diagnostics>
   openExternal(url: string): Promise<void>
   openLogs(): Promise<void>
+  wipeAll(confirm: string): Promise<boolean>
   bot: {
     set(userId: string, token?: string): Promise<{ app: { id: string; name: string }; links: { userInstall: string; serverInvite: string } }>
     clear(): Promise<boolean>

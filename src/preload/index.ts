@@ -30,6 +30,7 @@ const api = {
   diagnostics: () => invoke('diagnostics:get'),
   openExternal: (url: string) => invoke('app:openExternal', { url }),
   openLogs: () => invoke('app:openLogs'),
+  wipeAll: (confirm: string) => invoke('app:wipeAll', { confirm }),
   bot: {
     set: (userId: string, token?: string) => invoke('bot:set', { token, userId }),
     clear: () => invoke('bot:clear'),

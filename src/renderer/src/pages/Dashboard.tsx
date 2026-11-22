@@ -4,8 +4,8 @@ import { StoreSkinCard } from '../components/SkinCard'
 import { IconAlert, IconRefresh } from '../components/Icons'
 import { SkinImage } from '../components/SkinImage'
 import { Badge, Button, Card, Notice, useToast } from '../components/ui'
-import { api, errText } from '../lib/api'
-import { fmtDate, fmtDateTime, fmtRelative, periodDay } from '../lib/format'
+import { api, errText, type AppState, type StoredSnapshot } from '../lib/api'
+import { fmtDate, fmtDateTime, fmtRelative, fmtVp, periodDay } from '../lib/format'
 import { useData } from '../lib/store'
 
 export function Dashboard({ go }: { go: (p: Page) => void }) {
@@ -165,6 +165,8 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
         {store && !err && ready && !state.latestIsCurrent && <p className="mt-4 text-xs text-amber">※ このストアは更新期間を過ぎています。次回チェックで更新されます。</p>}
       </Card>
 
+      <BundleAndNightMarket state={state} />
+
       <div className="grid grid-cols-3 gap-4">
         <Card title="ウィッシュリスト一致状況" className="col-span-2" action={<button className="text-xs text-mute hover:text-bone" onClick={() => go('wishlist')}>すべて表示 →</button>}>
           {wishlist.length === 0 ? (
@@ -200,6 +202,65 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
           </ul>
         </Card>
       </div>
+    </div>
+  )
+}
+
+function BundleAndNightMarket({ state }: { state: AppState }) {
+  const s = state.settings
+  const wish = new Set(state.wishlistCount ? state.accountStores.flatMap((a) => a.matchedSkinIds) : [])
+  // featured bundle is global → take it from whichever account/store has it
+  const allStores = [state.latestStore, ...state.accountStores.map((a) => a.store)].filter(Boolean) as StoredSnapshot[]
+  const bundles = allStores.find((st) => st.bundles.length)?.bundles ?? []
+  const nmAccounts = state.accountStores.filter((a) => a.store?.nightMarket?.offers.length)
+  const soloNm = state.latestStore?.nightMarket?.offers.length ? state.latestStore.nightMarket : null
+  if (!bundles.length && !nmAccounts.length && !soloNm) return null
+  return (
+    <div className="space-y-4">
+      {bundles.map((b, i) => (
+        <Card key={i} title="フィーチャーバンドル">
+          <div className="flex flex-wrap items-start gap-4">
+            {b.icon && <img src={b.icon} alt="" className="h-20 w-36 object-contain" />}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-black">{b.name ?? 'バンドル'}</span>
+                {b.totalDiscounted != null && <span className="display text-crimson">{fmtVp(b.totalDiscounted)}</span>}
+                {b.totalBase != null && b.totalBase !== b.totalDiscounted && <span className="text-xs text-mute line-through">{fmtVp(b.totalBase)}</span>}
+                {b.endsAt && <Badge tone="mute">終了 {fmtDate(b.endsAt, s.timezone)}</Badge>}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {b.items.map((it) => (
+                  <div key={it.skinId} className="flex w-32 items-center gap-2 border border-ink-700 px-2 py-1">
+                    <SkinImage skin={it.skin} className="h-6 w-12" />
+                    <span className="truncate text-[11px]" title={it.skin?.nameJa}>{it.skin?.nameJa}</span>
+                  </div>
+                ))}
+                {b.otherItemCount > 0 && <span className="self-center text-xs text-mute">ほかアクセサリー {b.otherItemCount}点</span>}
+              </div>
+            </div>
+          </div>
+        </Card>
+      ))}
+      {(soloNm ? [{ key: 'solo', label: '', nm: soloNm }] : nmAccounts.map((a) => ({ key: a.key, label: a.label, nm: a.store!.nightMarket! }))).map((e) => (
+        <Card key={e.key} title={`🌙 ナイトマーケット${e.label ? `（${e.label}）` : ''}`}>
+          <div className="grid grid-cols-3 gap-3">
+            {e.nm.offers.map((o, i) => (
+              <div key={i} className={`flex items-center gap-3 border px-3 py-2 ${o.skinId && wish.has(o.skinId) ? 'border-crimson/70 bg-crimson/5' : 'border-ink-700'}`}>
+                <SkinImage skin={o.skin} className="h-9 w-16" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">{o.skin?.nameJa ?? '不明なスキン'}{o.skinId && wish.has(o.skinId) && ' ⭐'}</div>
+                  <div className="text-xs">
+                    <span className="font-bold text-teal">{fmtVp(o.nmPrice)}</span>
+                    {o.realPrice != null && <span className="ml-1 text-mute line-through">{fmtVp(o.realPrice)}</span>}
+                    {o.percent != null && <span className="ml-1 text-amber">-{o.percent}%</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {e.nm.endsAt && <p className="mt-2 text-xs text-mute">終了: {fmtDateTime(e.nm.endsAt, s.timezone)}</p>}
+        </Card>
+      ))}
     </div>
   )
 }

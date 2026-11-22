@@ -1,4 +1,4 @@
-import type { MatchResult, Priority, ResolvedOffer } from '../types'
+import type { MatchResult, Priority, ResolvedBundle, ResolvedNightMarket, ResolvedOffer } from '../types'
 import { HttpError, fetchWithTimeout, type FetchLike } from '../util/http'
 import { formatZonedDate, sleep } from '../util/time'
 
@@ -87,6 +87,44 @@ export function buildDailyPayload(offers: ResolvedOffer[], tz: string, periodDat
       }
       return e
     }),
+    allowed_mentions: { parse: [] }
+  }
+}
+
+export function buildBundlePayload(bundle: ResolvedBundle, tz: string, accountLabel?: string | null): DiscordPayload {
+  const ends = bundle.endsAt ? `\n🕒 終了: ${formatZonedDate(new Date(bundle.endsAt), tz)}` : ''
+  const skinList = bundle.items.slice(0, 12).map((i) => `・${i.skin?.nameJa ?? '不明'}`).join('\n')
+  const more = bundle.otherItemCount ? `\n（ほかアクセサリー ${bundle.otherItemCount}点）` : ''
+  const price = bundle.totalDiscounted != null ? `\n💰 ${bundle.totalDiscounted.toLocaleString('ja-JP')} VP${bundle.totalBase && bundle.totalBase !== bundle.totalDiscounted ? `（通常 ${bundle.totalBase.toLocaleString('ja-JP')} VP）` : ''}` : ''
+  const img = bundle.icon
+  return {
+    username: 'VALORANT Store Watcher',
+    content: `${HEADER}\n${accountLabel ? `【${accountLabel}】` : ''}🎁 新しいバンドルが登場しました！`,
+    embeds: [
+      {
+        title: bundle.name ?? 'バンドル',
+        description: `${skinList}${more}${price}${ends}`.slice(0, 2000),
+        color: RED,
+        ...(img ? { image: { url: img } } : {}),
+        footer: { text: 'VALORANT Store Watcher（非公式・Riot Gamesとは無関係）' }
+      }
+    ],
+    allowed_mentions: { parse: [] }
+  }
+}
+
+export function buildNightMarketPayload(nm: ResolvedNightMarket, tz: string, wishlistIds: Set<string>, accountLabel?: string | null): DiscordPayload {
+  const ends = nm.endsAt ? `終了: ${formatZonedDate(new Date(nm.endsAt), tz)}` : ''
+  const lines = nm.offers.slice(0, 20).map((o) => {
+    const star = o.skinId && wishlistIds.has(o.skinId) ? '⭐ ' : ''
+    const off = o.percent != null ? ` (-${o.percent}%)` : ''
+    const price = o.nmPrice != null ? ` ${o.nmPrice.toLocaleString('ja-JP')} VP` : ''
+    return `${star}${o.skin?.nameJa ?? '不明なスキン'}${off}${price}`
+  })
+  return {
+    username: 'VALORANT Store Watcher',
+    content: `${HEADER}\n${accountLabel ? `【${accountLabel}】` : ''}🌙 ナイトマーケットが開催中です！`,
+    embeds: [{ title: 'ナイトマーケット', description: `${lines.join('\n')}\n\n${ends}`.slice(0, 2000), color: 0x8a5cff, footer: { text: 'VALORANT Store Watcher（非公式）' } }],
     allowed_mentions: { parse: [] }
   }
 }

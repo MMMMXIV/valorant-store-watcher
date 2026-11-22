@@ -55,6 +55,32 @@ export interface StoreOfferInput {
   currencyId?: string | null
 }
 
+export interface BundleItemInput {
+  itemId: string
+  typeId?: string | null
+  amount?: number | null
+  basePrice?: number | null
+  discountedPrice?: number | null
+  discountPercent?: number | null
+}
+export interface BundleInput {
+  bundleId: string | null // DataAssetID (maps to the bundle catalog)
+  endsAt: string | null
+  totalBase?: number | null
+  totalDiscounted?: number | null
+  items: BundleItemInput[]
+}
+export interface NightMarketOfferInput {
+  itemId: string
+  realPrice?: number | null
+  nmPrice?: number | null
+  percent?: number | null
+}
+export interface NightMarketInput {
+  endsAt: string | null
+  offers: NightMarketOfferInput[]
+}
+
 export interface StoreSnapshot {
   accountId: string
   accountName?: string | null
@@ -63,6 +89,24 @@ export interface StoreSnapshot {
   periodEnd?: string | null // = next store refresh, when known
   source: string // provider id
   offers: StoreOfferInput[]
+  bundles?: BundleInput[]
+  nightMarket?: NightMarketInput | null
+}
+
+/** Resolved bundle for display (skins joined to the catalog). */
+export interface ResolvedBundle {
+  bundleId: string | null
+  name: string | null
+  icon: string | null
+  endsAt: string | null
+  totalBase: number | null
+  totalDiscounted: number | null
+  items: Array<{ skinId: string | null; skin: CatalogSkin | null; typeId: string | null; basePrice: number | null; discountedPrice: number | null; discountPercent: number | null }>
+  otherItemCount: number
+}
+export interface ResolvedNightMarket {
+  endsAt: string | null
+  offers: Array<{ skinId: string | null; skin: CatalogSkin | null; realPrice: number | null; nmPrice: number | null; percent: number | null }>
 }
 
 export interface ResolvedOffer {
@@ -84,6 +128,8 @@ export interface StoredSnapshot {
   fetchedAt: string
   source: string
   offers: ResolvedOffer[]
+  bundles: ResolvedBundle[]
+  nightMarket: ResolvedNightMarket | null
 }
 
 export interface MatchResult {
@@ -91,7 +137,7 @@ export interface MatchResult {
   wish: WishlistItem
 }
 
-export type NotificationKind = 'wishlist' | 'daily' | 'error' | 'test' | 'desktop-wishlist' | 'desktop-store'
+export type NotificationKind = 'wishlist' | 'daily' | 'error' | 'test' | 'desktop-wishlist' | 'desktop-store' | 'bundle' | 'nightmarket' | 'desktop-bundle' | 'desktop-nightmarket'
 
 export interface NotificationRecord {
   id: number

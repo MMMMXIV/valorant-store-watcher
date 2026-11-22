@@ -121,15 +121,25 @@ export class CatalogService {
       this.meta.set(META_UPDATED, new Date().toISOString())
       return this.status()
     }
-    const [wJa, wEn, tJa, tEn] = await Promise.all([
+    const [wJa, wEn, tJa, tEn, bJa, bEn] = await Promise.all([
       this.api.weapons('ja-JP'),
       this.api.weapons('en-US'),
       this.api.contentTiers('ja-JP'),
-      this.api.contentTiers('en-US')
+      this.api.contentTiers('en-US'),
+      this.api.bundles('ja-JP').catch(() => []),
+      this.api.bundles('en-US').catch(() => [])
     ])
     const data = buildCatalog(wJa, wEn, tJa, tEn)
     if (data.skins.length < 50) throw new Error('取得したスキン数が少なすぎるため、カタログ更新を中止しました')
     this.repo.replaceAll(data)
+    if (bJa.length) {
+      const en = new Map(bEn.map((b) => [b.uuid.toLowerCase(), b.displayName]))
+      this.repo.replaceBundles(
+        bJa
+          .map((b) => ({ id: b.uuid.toLowerCase(), nameJa: b.displayName, nameEn: en.get(b.uuid.toLowerCase()) ?? b.displayName, icon: b.displayIcon }))
+          .filter((b) => /^[0-9a-f-]{36}$/.test(b.id))
+      )
+    }
     this.meta.set(META_VERSION, versionKey)
     this.meta.set(META_UPDATED, new Date().toISOString())
     this.meta.set('riot_client_version', version.riotClientVersion)

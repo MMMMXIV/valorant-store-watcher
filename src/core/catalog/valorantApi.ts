@@ -45,6 +45,12 @@ export interface ApiContentTier {
   rank: number
   highlightColor: string
 }
+export interface ApiBundle {
+  uuid: string
+  displayName: string
+  displayIcon: string | null
+  displayIcon2: string | null
+}
 export interface ApiVersion {
   manifestId: string
   version: string
@@ -72,5 +78,8 @@ export class ValorantApiClient {
   }
   contentTiers(language: 'ja-JP' | 'en-US'): Promise<ApiContentTier[]> {
     return this.get(`/v1/contenttiers?language=${language}`)
+  }
+  bundles(language: 'ja-JP' | 'en-US'): Promise<ApiBundle[]> {
+    return this.get(`/v1/bundles?language=${language}`)
   }
 }

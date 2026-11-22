@@ -24,6 +24,7 @@ export const IpcSchemas = {
   'diagnostics:get': z.undefined(),
   'app:openExternal': z.object({ url: z.string().url().max(500) }),
   'app:openLogs': z.undefined(),
+  'app:wipeAll': z.object({ confirm: z.string().max(20) }),
   'tier:load': z.undefined(),
   'tier:save': z.object({ data: z.unknown() }),
   'tier:export': z.object({

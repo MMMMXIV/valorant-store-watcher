@@ -2,6 +2,7 @@ import type { AppDatabase } from './Database'
 import { DEFAULT_SETTINGS, SettingsSchema, type Settings, type SettingsPatch } from '../settings'
 import type {
   AliasKind,
+  BundleInput,
   CatalogSkin,
   CheckRun,
   CheckTrigger,
@@ -11,6 +12,9 @@ import type {
   NotificationKind,
   NotificationRecord,
   Priority,
+  NightMarketInput,
+  ResolvedBundle,
+  ResolvedNightMarket,
   ResolvedOffer,
   StoredSnapshot,
   Weapon,
@@ -123,6 +127,18 @@ export class CatalogRepo {
 
   count(): number {
     return Number(this.db.get<{ c: number }>('SELECT COUNT(*) AS c FROM skins WHERE removed = 0')?.c ?? 0)
+  }
+
+  getBundle(id: string): { id: string; nameJa: string; icon: string | null } | null {
+    const r = this.db.get<{ id: string; name_ja: string; icon: string | null }>('SELECT id, name_ja, icon FROM bundles WHERE id = ?', [id.toLowerCase()])
+    return r ? { id: r.id, nameJa: r.name_ja, icon: r.icon } : null
+  }
+
+  replaceBundles(list: Array<{ id: string; nameJa: string; nameEn: string; icon: string | null }>): void {
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM bundles')
+      for (const b of list) this.db.run('INSERT OR REPLACE INTO bundles(id, name_ja, name_en, icon) VALUES (?,?,?,?)', [b.id, b.nameJa, b.nameEn, b.icon])
+    })
   }
 
   weapons(): Weapon[] {
@@ -269,25 +285,33 @@ export class StoreRepo {
   ) {}
 
   /** Inserts or replaces the snapshot for (account, period). Returns the stored id. */
-  save(s: Omit<StoredSnapshot, 'id' | 'offers'>, offers: ResolvedOffer[]): number {
+  save(
+    s: { accountId: string; accountName: string | null; periodKey: string; periodStart: string | null; periodEnd: string | null; fetchedAt: string; source: string },
+    offers: ResolvedOffer[],
+    extra?: { bundles?: BundleInput[]; nightMarket?: NightMarketInput | null }
+  ): number {
+    const bundlesJson = extra?.bundles?.length ? JSON.stringify(extra.bundles) : null
+    const nmJson = extra?.nightMarket ? JSON.stringify(extra.nightMarket) : null
     return this.db.transaction(() => {
       const existing = this.db.get<{ id: number }>('SELECT id FROM store_snapshots WHERE account_id = ? AND period_key = ?', [s.accountId, s.periodKey])
       let id: number
       if (existing) {
         id = existing.id
-        this.db.run('UPDATE store_snapshots SET account_name=?, period_start=?, period_end=?, fetched_at=?, source=? WHERE id=?', [
+        this.db.run('UPDATE store_snapshots SET account_name=?, period_start=?, period_end=?, fetched_at=?, source=?, bundles_json=?, night_market_json=? WHERE id=?', [
           s.accountName,
           s.periodStart,
           s.periodEnd,
           s.fetchedAt,
           s.source,
+          bundlesJson,
+          nmJson,
           id
         ])
         this.db.run('DELETE FROM store_offers WHERE snapshot_id = ?', [id])
       } else {
         id = this.db.run(
-          'INSERT INTO store_snapshots(account_id, account_name, period_key, period_start, period_end, fetched_at, source) VALUES (?,?,?,?,?,?,?)',
-          [s.accountId, s.accountName, s.periodKey, s.periodStart, s.periodEnd, s.fetchedAt, s.source]
+          'INSERT INTO store_snapshots(account_id, account_name, period_key, period_start, period_end, fetched_at, source, bundles_json, night_market_json) VALUES (?,?,?,?,?,?,?,?,?)',
+          [s.accountId, s.accountName, s.periodKey, s.periodStart, s.periodEnd, s.fetchedAt, s.source, bundlesJson, nmJson]
         ).lastId
       }
       for (const o of offers) {
@@ -314,6 +338,8 @@ export class StoreRepo {
       period_end: string | null
       fetched_at: string
       source: string
+      bundles_json: string | null
+      night_market_json: string | null
     }>('SELECT * FROM store_snapshots ORDER BY fetched_at DESC LIMIT ?', [limit])
     return rows.map((r) => ({
       id: r.id,
@@ -324,8 +350,54 @@ export class StoreRepo {
       periodEnd: r.period_end,
       fetchedAt: r.fetched_at,
       source: r.source,
-      offers: this.offers(r.id)
+      offers: this.offers(r.id),
+      bundles: this.resolveBundles(r.bundles_json),
+      nightMarket: this.resolveNightMarket(r.night_market_json)
     }))
+  }
+
+  private resolveBundles(json: string | null): ResolvedBundle[] {
+    if (!json) return []
+    let list: BundleInput[]
+    try {
+      list = JSON.parse(json) as BundleInput[]
+    } catch {
+      return []
+    }
+    return list.map((b) => {
+      const meta = b.bundleId ? this.catalog.getBundle(b.bundleId) : null
+      const items = b.items.map((it) => {
+        const skinId = this.catalog.resolveSkinId(it.itemId)
+        return { skinId, skin: skinId ? this.catalog.getSkin(skinId) : null, typeId: it.typeId ?? null, basePrice: it.basePrice ?? null, discountedPrice: it.discountedPrice ?? null, discountPercent: it.discountPercent ?? null }
+      })
+      return {
+        bundleId: b.bundleId,
+        name: meta?.nameJa ?? null,
+        icon: meta?.icon ?? null,
+        endsAt: b.endsAt,
+        totalBase: b.totalBase ?? null,
+        totalDiscounted: b.totalDiscounted ?? null,
+        items: items.filter((i) => i.skin),
+        otherItemCount: items.filter((i) => !i.skin).length
+      }
+    })
+  }
+
+  private resolveNightMarket(json: string | null): ResolvedNightMarket | null {
+    if (!json) return null
+    let nm: NightMarketInput
+    try {
+      nm = JSON.parse(json) as NightMarketInput
+    } catch {
+      return null
+    }
+    return {
+      endsAt: nm.endsAt,
+      offers: nm.offers.map((o) => {
+        const skinId = this.catalog.resolveSkinId(o.itemId)
+        return { skinId, skin: skinId ? this.catalog.getSkin(skinId) : null, realPrice: o.realPrice ?? null, nmPrice: o.nmPrice ?? null, percent: o.percent ?? null }
+      })
+    }
   }
 
   /** Latest snapshot of one account (optionally from one source). */

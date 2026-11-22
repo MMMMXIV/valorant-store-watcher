@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { StoreOfferInput, StoreSnapshot } from '../types'
+import type { BundleInput, NightMarketInput, StoreOfferInput, StoreSnapshot } from '../types'
 import { VP_CURRENCY_ID } from '../types'
 import { normalizeUuid } from '../util/ids'
 import { utcDayBounds } from './period'
@@ -26,6 +26,7 @@ const VswFormat = z.object({
  * Storefront-shaped JSON as documented by the community (techchrism/valorant-api-docs, "GET Store_GetStorefrontV2").
  * Only the fields we need are validated; unknown fields are ignored.
  */
+const num = z.record(z.string(), z.number())
 const StorefrontFormat = z.object({
   SkinsPanelLayout: z.object({
     SingleItemOffers: z.array(z.string()).optional(),
@@ -33,13 +34,53 @@ const StorefrontFormat = z.object({
       .array(
         z.object({
           OfferID: z.string(),
-          Cost: z.record(z.string(), z.number()).optional(),
+          Cost: num.optional(),
           Rewards: z.array(z.object({ ItemID: z.string() }).passthrough()).optional()
         }).passthrough()
       )
       .optional(),
     SingleItemOffersRemainingDurationInSeconds: z.number().optional()
-  }).passthrough()
+  }).passthrough(),
+  FeaturedBundle: z
+    .object({
+      Bundles: z
+        .array(
+          z.object({
+            DataAssetID: z.string().optional(),
+            DurationRemainingInSeconds: z.number().optional(),
+            TotalBaseCost: num.nullish(),
+            TotalDiscountedCost: num.nullish(),
+            Items: z
+              .array(
+                z.object({
+                  Item: z.object({ ItemID: z.string(), ItemTypeID: z.string().optional(), Amount: z.number().optional() }).passthrough(),
+                  BasePrice: z.number().optional(),
+                  DiscountedPrice: z.number().optional(),
+                  DiscountPercent: z.number().optional()
+                }).passthrough()
+              )
+              .optional()
+          }).passthrough()
+        )
+        .optional()
+    })
+    .passthrough()
+    .optional(),
+  BonusStore: z
+    .object({
+      BonusStoreOffers: z
+        .array(
+          z.object({
+            Offer: z.object({ OfferID: z.string(), Cost: num.optional(), Rewards: z.array(z.object({ ItemID: z.string() }).passthrough()).optional() }).passthrough(),
+            DiscountCosts: num.optional(),
+            DiscountPercent: z.number().optional()
+          }).passthrough()
+        )
+        .optional(),
+      BonusStoreRemainingDurationInSeconds: z.number().optional()
+    })
+    .passthrough()
+    .nullish()
 }).passthrough()
 
 export class ImportFormatError extends Error {
@@ -111,7 +152,36 @@ export function snapshotFromStorefront(
     if (!offers.length) throw new ImportFormatError('ストアのスキン情報が含まれていません')
     const rem = p.SingleItemOffersRemainingDurationInSeconds
     const periodEnd = typeof rem === 'number' && rem > 0 ? new Date(now.getTime() + rem * 1000).toISOString() : utcDayBounds(now).end.toISOString()
-    return { accountId: meta.accountId, accountName: meta.accountName, fetchedAt: now.toISOString(), periodStart: null, periodEnd, source: meta.source, offers }
+    const endsFrom = (sec: number | undefined): string | null => (typeof sec === 'number' && sec > 0 ? new Date(now.getTime() + sec * 1000).toISOString() : null)
+
+    const bundles: BundleInput[] = (sf.data.FeaturedBundle?.Bundles ?? []).map((b) => ({
+      bundleId: normalizeUuid(b.DataAssetID),
+      endsAt: endsFrom(b.DurationRemainingInSeconds),
+      totalBase: b.TotalBaseCost?.[VP_CURRENCY_ID] ?? null,
+      totalDiscounted: b.TotalDiscountedCost?.[VP_CURRENCY_ID] ?? null,
+      items: (b.Items ?? []).map((it) => ({
+        itemId: it.Item.ItemID,
+        typeId: it.Item.ItemTypeID ?? null,
+        amount: it.Item.Amount ?? null,
+        basePrice: it.BasePrice ?? null,
+        discountedPrice: it.DiscountedPrice ?? null,
+        discountPercent: it.DiscountPercent ?? null
+      }))
+    }))
+    const bonus = sf.data.BonusStore
+    const nightMarket: NightMarketInput | null = bonus?.BonusStoreOffers?.length
+      ? {
+          endsAt: endsFrom(bonus.BonusStoreRemainingDurationInSeconds),
+          offers: bonus.BonusStoreOffers.map((o) => ({
+            itemId: o.Offer.Rewards?.[0]?.ItemID ?? o.Offer.OfferID,
+            realPrice: o.Offer.Cost?.[VP_CURRENCY_ID] ?? null,
+            nmPrice: o.DiscountCosts?.[VP_CURRENCY_ID] ?? null,
+            percent: o.DiscountPercent ?? null
+          }))
+        }
+      : null
+
+    return { accountId: meta.accountId, accountName: meta.accountName, fetchedAt: now.toISOString(), periodStart: null, periodEnd, source: meta.source, offers, bundles, nightMarket }
   }
 }
 

@@ -55,5 +55,10 @@ export const MIGRATIONS: string[] = [
   CREATE TABLE error_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, message TEXT NOT NULL
   );
+  `,
+  `
+  ALTER TABLE store_snapshots ADD COLUMN bundles_json TEXT;
+  ALTER TABLE store_snapshots ADD COLUMN night_market_json TEXT;
+  CREATE TABLE bundles (id TEXT PRIMARY KEY, name_ja TEXT NOT NULL, name_en TEXT NOT NULL, icon TEXT);
   `
 ]

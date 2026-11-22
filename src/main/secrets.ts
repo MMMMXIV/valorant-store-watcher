@@ -58,4 +58,14 @@ export class SecretStore {
     delete this.load()[key]
     this.save()
   }
+
+  /** Deletes every stored secret and the file itself. */
+  wipe(): void {
+    this.cache = {}
+    try {
+      fs.rmSync(this.file, { force: true })
+    } catch {
+      /* ignore */
+    }
+  }
 }

@@ -579,6 +579,38 @@ function registerIpc(): void {
   })
   handle('app:openExternal', ({ url }) => openExternalSafe(url))
   handle('app:openLogs', () => shell.openPath(path.dirname(logger.file)))
+  handle('app:wipeAll', async ({ confirm }) => {
+    if (confirm !== 'DELETE') throw new Error('確認コードが一致しません')
+    logger.info('全データの消去を開始します')
+    core.scheduler.stop()
+    // remove every Riot account + its browser session
+    for (const a of riot.accounts()) {
+      riot.remove(a.key)
+      await wipeRiotSession(a.key).catch(() => undefined)
+    }
+    await wipeRiotApiSession().catch(() => undefined)
+    // drop all secrets (webhook, bot token, riot cookies) and the database file
+    secrets.wipe()
+    const dbPath = path.join(app.getPath('userData'), 'vsw.sqlite')
+    try {
+      core.close()
+    } catch {
+      /* ignore */
+    }
+    for (const f of [dbPath, `${dbPath}.tmp`]) {
+      try {
+        fs.rmSync(f, { force: true })
+      } catch {
+        /* ignore */
+      }
+    }
+    core.repos.meta.set('discord_bot_app', null) // best-effort (db already closed)
+    logger.info('全データを消去しました。アプリを再起動します。')
+    quitting = true
+    app.relaunch()
+    app.exit(0)
+    return true
+  })
   handle('tier:load', () => {
     const raw = core.repos.meta.get('tierlist')
     try {

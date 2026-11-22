@@ -205,6 +205,8 @@ footer p { margin: 0.3rem 0; max-width: 60em; }
         <li><a href="#notify">通知の受け取り方を選ぶ</a></li>
         <li><a href="#tier">スキンTier表を作る</a></li>
         <li><a href="#daily">毎日の使い方</a></li>
+        <li><a href="#bundle">バンドル・ナイトマーケット</a></li>
+        <li><a href="#wipe">データの消去</a></li>
         <li><a href="#update">アップデート</a></li>
         <li><a href="#trouble">困ったとき</a></li>
       </ol>
@@ -427,7 +429,7 @@ footer p { margin: 0.3rem 0; max-width: 60em; }
       <h3>どんなときに通知するか</h3>
       <p><span class="ui">設定</span> → <span class="ui">通知条件</span> で選べます。ふつうは最初のままで大丈夫です。Discordとは別に、<strong>Windowsの通知</strong>（画面右下に出るお知らせ）も使えます。Discordを使わず、Windows通知だけにすることもできます。</p>
       <figure class="narrow">
-        <img src="img/09-notify-conditions.png" alt="通知条件の設定。Discord通知を有効にする、ウィッシュリスト一致時に通知、毎日のストア全体を通知、エラー発生時に通知のスイッチ" width="533" height="550" loading="lazy">
+        <img src="img/09-notify-conditions.png" alt="通知条件の設定。Discord通知を有効にする、ウィッシュリスト一致時に通知、毎日のストア全体を通知、エラー発生時に通知のスイッチ" width="533" height="711" loading="lazy">
       </figure>
       <div class="table-wrap">
         <table>
@@ -501,6 +503,36 @@ footer p { margin: 0.3rem 0; max-width: 60em; }
 
       <h3>チェックする時刻を変える</h3>
       <p>ふつうは変える必要はありません。アプリはストアの更新時刻をRiotから受け取り、その5分後にチェックします。更新時刻が分からないときは、<span class="ui">設定</span> → <span class="ui">自動チェック</span> の「チェック時刻」（最初は 9:05）に確認します。</p>
+    </section>
+
+    <!-- extra: bundle / night market -->
+    <section class="chapter" id="bundle">
+      <header><span class="chapter-no">＋</span><h2>バンドルとナイトマーケットの通知</h2></header>
+      <p>デイリーストアの4スキンに加えて、<strong>フィーチャーバンドル</strong>と<strong>ナイトマーケット（割引市）</strong>も取得・表示し、通知できます。</p>
+      <ul>
+        <li><strong>バンドルが切り替わったら通知</strong>（初期値ON）：新しいバンドルが登場したときにお知らせします。</li>
+        <li><strong>ナイトマーケットが来たら通知</strong>（初期値ON）：ナイトマーケットが開催されたときにお知らせします。ウィッシュリストのスキンには⭐が付きます。</li>
+      </ul>
+      <p><span class="ui">設定</span> → <span class="ui">通知条件</span> で、それぞれON/OFFできます。これらの通知はDiscordとWindowsの両方に届きます。</p>
+      <figure>
+        <img src="img/19-bundle-nm.png" alt="ダッシュボードに本日のストア、フィーチャーバンドル、ナイトマーケットが順に表示されている" width="1440" height="1200" loading="lazy">
+        <figcaption>ダッシュボードには、バンドル（割引価格・内容）とナイトマーケット（割引率）も表示されます。</figcaption>
+      </figure>
+    </section>
+
+    <!-- extra: wipe all -->
+    <section class="chapter" id="wipe">
+      <header><span class="chapter-no">＋</span><h2>すべてのデータを消去する</h2></header>
+      <p>PCを手放すときなどに、アプリのデータを完全に消せます。<span class="ui">設定</span> → <span class="ui">診断・ログ</span> のいちばん下の <span class="ui">データを消去…</span> から行います。</p>
+      <ol class="steps">
+        <li><p><span class="ui">データを消去…</span> を押すと、確認画面が開きます。</p></li>
+        <li><p>消えるものの一覧（ウィッシュリスト・Tier表・履歴・Discord設定・すべてのRiotログイン情報・設定）を確認します。</p></li>
+        <li><p>間違い防止のため、<strong>半角大文字で <code>DELETE</code> と入力</strong>してから <span class="ui">完全に消去してアプリを再起動</span> を押します。</p></li>
+      </ol>
+      <figure class="narrow">
+        <img src="img/18-wipe.png" alt="データ消去の確認画面。消えるものの一覧とDELETE入力欄がある" width="1086" height="536" loading="lazy">
+      </figure>
+      <div class="callout danger"><p>消去は<strong>取り消せません</strong>。消したあとは、スキンの登録・Discord設定・Riotログインをやり直す必要があります。</p></div>
     </section>
 
     <!-- 07 -->

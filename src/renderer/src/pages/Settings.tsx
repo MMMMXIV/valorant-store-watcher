@@ -508,6 +508,11 @@ function NotifyCard({ s, save }: { s: Settings; save: SaveFn }) {
         <Toggle checked={s.notifyErrors} onChange={(v) => void save({ notifyErrors: v })} label="エラー発生時に通知" description="ストア取得に失敗したとき（1日1回まで）" />
       </div>
       <div className="mt-3 border-t border-ink-700 pt-3">
+        <div className="mb-1 text-xs font-bold text-mute">バンドル・ナイトマーケット（Discord＋Windows）</div>
+        <Toggle checked={s.notifyBundle} onChange={(v) => void save({ notifyBundle: v })} label="バンドルが切り替わったら通知" description="新しいフィーチャーバンドルが登場したときに通知します" />
+        <Toggle checked={s.notifyNightMarket} onChange={(v) => void save({ notifyNightMarket: v })} label="ナイトマーケットが来たら通知" description="ナイトマーケット（割引市）が開催されたときに通知します（推奨）" />
+      </div>
+      <div className="mt-3 border-t border-ink-700 pt-3">
         <div className="mb-1 text-xs font-bold text-mute">Windows 通知（この画面の右下に表示）</div>
         <Toggle checked={s.desktopNotifyWishlist} onChange={(v) => void save({ desktopNotifyWishlist: v })} label="ウィッシュリスト一致時にWindows通知" description="登録スキンがストアに登場したら、Windowsの通知で知らせます（推奨）" />
         <Toggle checked={s.desktopNotifyStore} onChange={(v) => void save({ desktopNotifyStore: v })} label="ストア取得時にWindows通知" description="毎日ストアを取得したときに、Windowsの通知で知らせます" />
@@ -636,7 +641,63 @@ function DiagnosticsCard() {
           <p className="text-[11px] text-mute">※ ログにはWebhook URLやトークンなどの秘密情報は記録されません（自動でマスクされます）。</p>
         </div>
       )}
+      <WipeAllSection />
     </Card>
+  )
+}
+
+function WipeAllSection() {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const wipe = async () => {
+    setBusy(true)
+    try {
+      await api().wipeAll('DELETE')
+      // the app relaunches; this toast rarely shows
+      toast('ok', 'すべてのデータを消去しました。アプリを再起動します。')
+    } catch (e) {
+      toast('err', errText(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="mt-5 border-t border-crimson/30 pt-4">
+      <div className="text-xs font-bold text-crimson">すべてのデータを消去</div>
+      {!open ? (
+        <div className="mt-2 flex items-center justify-between gap-4">
+          <p className="text-xs text-mute">ウィッシュリスト・履歴・Tier表・設定・Discord通知先・すべてのRiotログイン情報を完全に削除します。PCを手放すときなどに使います。</p>
+          <Button variant="danger" onClick={() => setOpen(true)}>
+            データを消去…
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2 space-y-3 border border-crimson/50 bg-crimson/5 p-4">
+          <Notice tone="red" title="本当に消去しますか？（取り消せません）">
+            次のものがすべて消えます。
+            <ul className="mt-1 list-disc pl-5">
+              <li>ウィッシュリスト・Tier表・ストア履歴・通知履歴</li>
+              <li>Discord Webhook / BOT の設定</li>
+              <li>登録したすべてのRiotアカウントのログイン情報</li>
+              <li>すべての設定</li>
+            </ul>
+          </Notice>
+          <label className="block text-xs text-mute">
+            確認のため、半角大文字で <code className="text-crimson">DELETE</code> と入力してください
+            <input className={`${inputCls} mt-1`} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="DELETE" autoFocus spellCheck={false} />
+          </label>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => { setOpen(false); setConfirm('') }}>
+              キャンセル
+            </Button>
+            <Button variant="danger" busy={busy} disabled={confirm !== 'DELETE'} onClick={() => void wipe()}>
+              完全に消去してアプリを再起動
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

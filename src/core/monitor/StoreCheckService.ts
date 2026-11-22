@@ -1,8 +1,10 @@
 import type { Repos } from '../db/repositories'
 import {
+  buildBundlePayload,
   buildDailyPayload,
   buildErrorPayload,
   buildTestPayload,
+  buildNightMarketPayload,
   buildWishlistPayloads,
   sendWebhook,
   type DiscordPayload,
@@ -149,7 +151,8 @@ export class StoreCheckService {
         fetchedAt: snap.fetchedAt,
         source: snap.source
       },
-      offers
+      offers,
+      { bundles: snap.bundles, nightMarket: snap.nightMarket }
     )
     const stored = repos.stores.list(400).find((s) => s.id === snapshotId) ?? null
     const matches = matchWishlist(offers, repos.wishlist.list())
@@ -172,7 +175,44 @@ export class StoreCheckService {
       repos.notifications.record(snap.accountId, periodKey, '', 'daily', r.ok, r.attempts, r.error)
       if (!r.ok) failed++
     }
+
     const desktop = this.buildDesktop(snap.accountId, periodKey, matches, offers.length, settings, label)
+    const wishlistIds = new Set(repos.wishlist.list().map((w) => w.skinId))
+
+    // Featured bundle rotation (global, but deduped per account so each account's notification is independent).
+    if (settings.notifyBundle && stored?.bundles.length) {
+      for (const bundle of stored.bundles) {
+        const key = `bundle:${bundle.bundleId ?? bundle.name ?? 'x'}:${bundle.endsAt ?? ''}`
+        if (webhook && !repos.notifications.wasSent(snap.accountId, key, '', 'bundle')) {
+          const r = await this.trySend(webhook, buildBundlePayload(bundle, settings.timezone, label))
+          repos.notifications.record(snap.accountId, key, '', 'bundle', r.ok, r.attempts, r.error)
+          if (r.ok) notified++
+          else failed++
+        }
+        if (!repos.notifications.wasSent(snap.accountId, key, '', 'desktop-bundle')) {
+          repos.notifications.record(snap.accountId, key, '', 'desktop-bundle', true, 0, null)
+          desktop.push({ kind: 'store', title: '🎁 新しいバンドルが登場', body: `${label ? `${label}: ` : ''}${bundle.name ?? 'バンドル'}${bundle.totalDiscounted != null ? `（${bundle.totalDiscounted.toLocaleString('ja-JP')} VP）` : ''}` })
+        }
+      }
+    }
+
+    // Night Market (per account, only during an event).
+    if (settings.notifyNightMarket && stored?.nightMarket?.offers.length) {
+      const nm = stored.nightMarket
+      const key = `nm:${nm.endsAt ?? periodKey}`
+      const hits = nm.offers.filter((o) => o.skinId && wishlistIds.has(o.skinId)).length
+      if (webhook && !repos.notifications.wasSent(snap.accountId, key, '', 'nightmarket')) {
+        const r = await this.trySend(webhook, buildNightMarketPayload(nm, settings.timezone, wishlistIds, label))
+        repos.notifications.record(snap.accountId, key, '', 'nightmarket', r.ok, r.attempts, r.error)
+        if (r.ok) notified++
+        else failed++
+      }
+      if (!repos.notifications.wasSent(snap.accountId, key, '', 'desktop-nightmarket')) {
+        repos.notifications.record(snap.accountId, key, '', 'desktop-nightmarket', true, 0, null)
+        desktop.push({ kind: 'store', title: '🌙 ナイトマーケット開催中', body: `${label ? `${label}: ` : ''}割引スキン ${nm.offers.length}個${hits ? `（ウィッシュリスト ${hits}個）` : ''}` })
+      }
+    }
+
     return { matches, notified, failed, unresolved: offers.filter((o) => !o.skinId).length, stored, desktop }
   }
 
