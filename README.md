@@ -74,7 +74,7 @@ F12 → Application → Cookies → `https://auth.riotgames.com` の `ssid` の�
 
 ## 3. インストール方法
 
-1. `VALORANT-Store-Watcher-Setup-1.3.0.exe` をダブルクリックします。
+1. `VALORANT-Store-Watcher-Setup.exe` をダブルクリックします。
 2. 「WindowsによってPCが保護されました」と表示された場合は、**［詳細情報］→［実行］** を押してください。
    （コード署名証明書を使っていないため表示されます）
 3. 画面の案内に従って［次へ］を押すとインストールが完了します。管理者権限は不要です。

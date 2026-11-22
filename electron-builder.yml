@@ -31,7 +31,8 @@ win:
     - target: nsis
       arch: [x64]
   icon: build/icon.ico
-  artifactName: VALORANT-Store-Watcher-Setup-${version}.${ext}
+  # fixed name → https://github.com/MMMMXIV/valorant-store-watcher/releases/latest/download/VALORANT-Store-Watcher-Setup.exe always serves the newest installer
+  artifactName: VALORANT-Store-Watcher-Setup.${ext}
 nsis:
   oneClick: false
   perMachine: false
