@@ -74,6 +74,15 @@ async function bootstrap(): Promise<void> {
       }
       broadcast()
     },
+    onResult: (r) => {
+      // Windows toast notifications (independent from Discord). Clicking one opens the app.
+      if (!Notification.isSupported()) return
+      for (const d of r.desktop) {
+        const n = new Notification({ title: d.title, body: d.body })
+        n.on('click', () => showWindow())
+        n.show()
+      }
+    },
     onPlan: (p) => {
       lastPlan = p
       updateTray()

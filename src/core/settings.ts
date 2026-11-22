@@ -17,6 +17,9 @@ export const SettingsSchema = z.object({
   notificationsEnabled: z.boolean().default(true),
   /** Where notifications go: a channel via Webhook, or the user's DMs via a BOT. */
   notifyChannel: z.enum(['webhook', 'bot']).default('webhook'),
+  /** Windows desktop (toast) notifications, independent from Discord. */
+  desktopNotifyWishlist: z.boolean().default(true),
+  desktopNotifyStore: z.boolean().default(false),
   /** Discord user ID that receives BOT DMs (not secret). */
   discordUserId: z.string().regex(/^\d{15,21}$/).nullable().default(null),
   notifyWishlist: z.boolean().default(true),

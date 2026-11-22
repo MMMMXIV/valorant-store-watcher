@@ -125,7 +125,7 @@ describe('4-8. 照合と通知', () => {
     expect(fields['⭐ 優先度']).toBe('高')
     expect(fields['🔫 武器']).toBe('ヴァンダル')
     expect(fields['🕒 ストア更新日']).toBe('2026/11/21')
-    expect(core.repos.notifications.list()[0]).toMatchObject({ status: 'sent', kind: 'wishlist', skinId: s.id })
+    expect(core.repos.notifications.list().find((n) => n.kind === 'wishlist')).toMatchObject({ status: 'sent', kind: 'wishlist', skinId: s.id })
   })
 
   it('5. does not notify when nothing matches', async () => {
@@ -204,7 +204,7 @@ describe('4-8. 照合と通知', () => {
     discord.queue.push(500, 500, 500, 500)
     const r1 = await core.checkService.runCheck('manual', store([s.id], '2026-11-21'))
     expect(r1.failedNotifications).toBe(1)
-    expect(core.repos.notifications.list()[0].status).toBe('failed')
+    expect(core.repos.notifications.list().find((n) => n.kind === 'wishlist')!.status).toBe('failed')
     const r2 = await core.checkService.runCheck('manual', store([s.id], '2026-11-21'))
     expect(r2.notified).toBe(1)
     const r3 = await core.checkService.runCheck('manual', store([s.id], '2026-11-21'))
@@ -406,6 +406,46 @@ describe('設定の部分更新（画面からの変更）', () => {
     expect(SettingsPatchSchema.parse({ providerId: 'manual-file' })).toEqual({ providerId: 'riot' })
     expect(() => SettingsPatchSchema.parse({ checkTime: '25:00' })).toThrow()
     expect(() => SettingsPatchSchema.parse({ unknownKey: 1 })).toThrow()
+  })
+})
+
+describe('Windows通知（デスクトップ通知）', () => {
+  it('fires a wishlist desktop notice once per period, respects OFF, and store notice separately', async () => {
+    const { core } = await createTestApp()
+    const s = findSkin(core, 'RGX 11z Pro Vandal')
+    core.repos.wishlist.add(s.id, 'high')
+    core.repos.settings.update({ providerId: 'mock', mockForceWishlistHit: true, notificationsEnabled: false })
+    // default: wishlist ON, store OFF
+    const r1 = await core.checkService.runCheck('manual')
+    expect(r1.desktop.map((d) => d.kind)).toEqual(['wishlist'])
+    expect(r1.desktop[0].body).toContain(s.nameJa)
+    // same period again → no repeat
+    const r2 = await core.checkService.runCheck('manual')
+    expect(r2.desktop).toHaveLength(0)
+  })
+
+  it('store notice can be enabled, wishlist disabled; both off = nothing', async () => {
+    const { core, clock } = await createTestApp()
+    const s = findSkin(core, 'RGX 11z Pro Vandal')
+    core.repos.wishlist.add(s.id)
+    core.repos.settings.update({ providerId: 'mock', mockForceWishlistHit: true, notificationsEnabled: false, desktopNotifyWishlist: false, desktopNotifyStore: true })
+    const r = await core.checkService.runCheck('manual')
+    expect(r.desktop.map((d) => d.kind)).toEqual(['store'])
+    expect(r.desktop[0].body).toContain('ウィッシュリスト 1件')
+    core.repos.settings.update({ desktopNotifyStore: false })
+    clock.now = new Date('2026-11-22T00:10:00Z')
+    const r2 = await core.checkService.runCheck('manual')
+    expect(r2.desktop).toHaveLength(0)
+  })
+
+  it('re-notifies on a new store period', async () => {
+    const { core, clock } = await createTestApp()
+    const s = findSkin(core, 'RGX 11z Pro Vandal')
+    core.repos.wishlist.add(s.id)
+    core.repos.settings.update({ providerId: 'mock', mockForceWishlistHit: true, notificationsEnabled: false })
+    expect((await core.checkService.runCheck('manual')).desktop).toHaveLength(1)
+    clock.now = new Date('2026-11-22T00:10:00Z')
+    expect((await core.checkService.runCheck('manual')).desktop).toHaveLength(1)
   })
 })
 

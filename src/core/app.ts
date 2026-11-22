@@ -19,6 +19,7 @@ export interface WatcherCoreOptions {
   sendOptions?: SendOptions
   tickMs?: number
   onChange?: () => void
+  onResult?: (r: import('./monitor/StoreCheckService').CheckResult, trigger: import('./types').CheckTrigger) => void
   onPlan?: (p: CheckPlan | null) => void
 }
 
@@ -49,7 +50,8 @@ export class WatcherCore {
       fetchImpl: opts.fetchImpl,
       now: opts.now,
       sendOptions: opts.sendOptions,
-      onChange: opts.onChange
+      onChange: opts.onChange,
+      onResult: opts.onResult
     })
     this.scheduler = new MonitorScheduler({
       service: this.checkService,

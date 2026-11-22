@@ -11,6 +11,7 @@ import {
 import type { ProviderContext, StoreProvider } from '../providers/StoreProvider'
 import { computePeriodKey } from '../providers/period'
 import type { CheckTrigger, MatchResult, StoredSnapshot, StoreSnapshot } from '../types'
+import type { Settings } from '../settings'
 import type { FetchLike } from '../util/http'
 import { errorMessage } from '../util/redact'
 import { formatZonedDate } from '../util/time'
@@ -23,6 +24,14 @@ export interface CheckResult {
   matches: MatchResult[]
   notified: number
   failedNotifications: number
+  /** Windows toast notifications the main process should show for this run (already deduped). */
+  desktop: DesktopNotice[]
+}
+
+export interface DesktopNotice {
+  kind: 'wishlist' | 'store'
+  title: string
+  body: string
 }
 
 /** A destination that can deliver a Discord message (Webhook channel or BOT DM). */
@@ -41,6 +50,8 @@ export interface CheckServiceDeps {
   now?: () => Date
   sendOptions?: SendOptions
   onChange?: () => void
+  /** Fired after each completed run (used to show Windows toast notifications). */
+  onResult?: (r: CheckResult, trigger: CheckTrigger) => void
 }
 
 /**
@@ -67,12 +78,52 @@ export class StoreCheckService {
   /** Single-flight: concurrent calls share the same run (prevents double notifications). */
   runCheck(trigger: CheckTrigger, imported?: StoreSnapshot): Promise<CheckResult> {
     if (!this.running) {
-      this.running = this.doRun(trigger, imported).finally(() => {
-        this.running = null
-        this.deps.onChange?.()
-      })
+      this.running = this.doRun(trigger, imported)
+        .then((r) => {
+          try {
+            this.deps.onResult?.(r, trigger)
+          } catch {
+            /* a notification failure must never break the check */
+          }
+          return r
+        })
+        .finally(() => {
+          this.running = null
+          this.deps.onChange?.()
+        })
     }
     return this.running
+  }
+
+  /**
+   * Builds the Windows toast notices for a run, deduplicated per store period so repeated
+   * checks on the same day never re-notify. Records them immediately (kinds desktop-wishlist / desktop-store).
+   */
+  private buildDesktop(accountId: string, periodKey: string, matches: MatchResult[], storeCount: number, settings: Settings): DesktopNotice[] {
+    const out: DesktopNotice[] = []
+    const now = () => this.now().toISOString()
+    if (settings.desktopNotifyWishlist) {
+      const fresh = matches.filter((m) => !this.deps.repos.notifications.wasSent(accountId, periodKey, m.offer.skinId!, 'desktop-wishlist'))
+      for (const m of fresh) this.deps.repos.notifications.record(accountId, periodKey, m.offer.skinId!, 'desktop-wishlist', true, 0, null)
+      if (fresh.length) {
+        const names = fresh.map((m) => m.offer.skin?.nameJa ?? '不明なスキン')
+        out.push({
+          kind: 'wishlist',
+          title: '🎯 ウィッシュリストのスキンがストアに登場！',
+          body: names.length === 1 ? `${names[0]} が今日のストアにあります` : `${names.slice(0, 3).join('、')}${names.length > 3 ? ` ほか${names.length - 3}件` : ''} が今日のストアにあります`
+        })
+      }
+    }
+    if (settings.desktopNotifyStore && !this.deps.repos.notifications.wasSent(accountId, periodKey, '', 'desktop-store')) {
+      this.deps.repos.notifications.record(accountId, periodKey, '', 'desktop-store', true, 0, null)
+      void now()
+      out.push({
+        kind: 'store',
+        title: '🛒 本日のストアを取得しました',
+        body: matches.length ? `ウィッシュリスト ${matches.length}件が登場中（全${storeCount}スキン）` : `本日のストア ${storeCount}スキンを確認しました`
+      })
+    }
+    return out
   }
 
   private async doRun(trigger: CheckTrigger, imported?: StoreSnapshot): Promise<CheckResult> {
@@ -138,7 +189,8 @@ export class StoreCheckService {
         lastErrorAt: failed ? this.now().toISOString() : null
       })
       if (failed) repos.errors.add('discord', `通知失敗 ${failed}件`)
-      return { status: 'success', message, snapshot: stored, matches, notified, failedNotifications: failed }
+      const desktop = this.buildDesktop(snap.accountId, periodKey, matches, offers.length, settings)
+      return { status: 'success', message, snapshot: stored, matches, notified, failedNotifications: failed, desktop }
     } catch (e) {
       const msg = errorMessage(e)
       const state = repos.monitor.get()
@@ -146,7 +198,7 @@ export class StoreCheckService {
       repos.runs.finish(runId, { status: 'error', message: msg })
       repos.errors.add(`check:${provider.id}`, msg)
       await this.notifyError(msg).catch(() => undefined)
-      return { status: 'error', message: msg, snapshot: null, matches: [], notified: 0, failedNotifications: 0 }
+      return { status: 'error', message: msg, snapshot: null, matches: [], notified: 0, failedNotifications: 0, desktop: [] }
     }
   }
 

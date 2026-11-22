@@ -91,7 +91,7 @@ export interface MatchResult {
   wish: WishlistItem
 }
 
-export type NotificationKind = 'wishlist' | 'daily' | 'error' | 'test'
+export type NotificationKind = 'wishlist' | 'daily' | 'error' | 'test' | 'desktop-wishlist' | 'desktop-store'
 
 export interface NotificationRecord {
   id: number

@@ -465,11 +465,18 @@ function WebhookSection() {
 function NotifyCard({ s, save }: { s: Settings; save: SaveFn }) {
   return (
     <Card title="通知条件">
-      <Toggle checked={s.notificationsEnabled} onChange={(v) => void save({ notificationsEnabled: v })} label="Discord通知を有効にする" description="OFFにするとすべての通知を停止します（ストアの取得・記録は続きます）" />
-      <div className={`border-t border-ink-700 ${s.notificationsEnabled ? '' : 'pointer-events-none opacity-40'}`}>
+      <div className="mb-1 text-xs font-bold text-mute">Discord 通知</div>
+      <Toggle checked={s.notificationsEnabled} onChange={(v) => void save({ notificationsEnabled: v })} label="Discord通知を有効にする" description="OFFにするとDiscordへの通知を停止します（ストアの取得・記録は続きます）" />
+      <div className={`${s.notificationsEnabled ? '' : 'pointer-events-none opacity-40'}`}>
         <Toggle checked={s.notifyWishlist} onChange={(v) => void save({ notifyWishlist: v })} label="ウィッシュリスト一致時に通知" description="登録スキンがストアに登場したら画像付きで通知（推奨）" />
         <Toggle checked={s.notifyDailyStore} onChange={(v) => void save({ notifyDailyStore: v })} label="毎日のストア全体を通知" description="一致の有無に関わらず、その日の4スキンを毎日1回通知" />
         <Toggle checked={s.notifyErrors} onChange={(v) => void save({ notifyErrors: v })} label="エラー発生時に通知" description="ストア取得に失敗したとき（1日1回まで）" />
+      </div>
+      <div className="mt-3 border-t border-ink-700 pt-3">
+        <div className="mb-1 text-xs font-bold text-mute">Windows 通知（この画面の右下に表示）</div>
+        <Toggle checked={s.desktopNotifyWishlist} onChange={(v) => void save({ desktopNotifyWishlist: v })} label="ウィッシュリスト一致時にWindows通知" description="登録スキンがストアに登場したら、Windowsの通知で知らせます（推奨）" />
+        <Toggle checked={s.desktopNotifyStore} onChange={(v) => void save({ desktopNotifyStore: v })} label="ストア取得時にWindows通知" description="毎日ストアを取得したときに、Windowsの通知で知らせます" />
+        <p className="mt-1 text-[11px] text-ink-500">Windows通知はDiscordとは別に動きます。Discordを使わず、Windows通知だけにすることもできます。</p>
       </div>
     </Card>
   )
