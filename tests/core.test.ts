@@ -10,6 +10,7 @@ import {
   searchSkins,
   sendWebhook,
   DEFAULT_SETTINGS,
+  SettingsPatchSchema,
   EMPTY_MONITOR_STATE,
   DiscordPermanentError,
   isValidWebhookUrl,
@@ -390,6 +391,20 @@ describe('スケジュール計算', () => {
     const p = planNextCheck(new Date('2026-11-21T02:00:00Z'), s, { ...base, consecutiveFailures: 5 })
     expect(p.reason).toBe('after-retries')
     expect(p.dueAt.toISOString()).toBe('2026-11-22T00:05:00.000Z')
+  })
+})
+
+describe('設定の部分更新（画面からの変更）', () => {
+  it('a one-field patch never resets other settings to defaults', async () => {
+    const { core } = await createTestApp()
+    core.repos.settings.update({ riskAcknowledged: true, checkTime: '10:30', notifyDailyStore: true, providerId: 'mock' })
+    const patch = SettingsPatchSchema.parse({ notifyChannel: 'bot' })
+    expect(patch).toEqual({ notifyChannel: 'bot' })
+    core.repos.settings.update(patch)
+    expect(core.repos.settings.get()).toMatchObject({ riskAcknowledged: true, checkTime: '10:30', notifyDailyStore: true, providerId: 'mock', notifyChannel: 'bot' })
+    expect(SettingsPatchSchema.parse({ providerId: 'manual-file' })).toEqual({ providerId: 'riot' })
+    expect(() => SettingsPatchSchema.parse({ checkTime: '25:00' })).toThrow()
+    expect(() => SettingsPatchSchema.parse({ unknownKey: 1 })).toThrow()
   })
 })
 

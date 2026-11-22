@@ -36,7 +36,17 @@ export const SettingsSchema = z.object({
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
-export const SettingsPatchSchema = SettingsSchema.partial().strict()
+/**
+ * Patch schema WITHOUT defaults. (With zod v4, `SettingsSchema.partial()` still fills in defaults
+ * for missing keys, so a one-field patch from the UI used to reset every other setting.)
+ */
+export const SettingsPatchSchema = z
+  .object(
+    Object.fromEntries(
+      Object.entries(SettingsSchema.shape).map(([k, v]) => [k, (v instanceof z.ZodDefault ? (v.unwrap() as z.ZodType) : (v as z.ZodType)).optional()])
+    ) as { [K in keyof typeof SettingsSchema.shape]: z.ZodOptional<z.ZodType<z.infer<typeof SettingsSchema>[K]>> }
+  )
+  .strict()
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>
 
 export const DEFAULT_SETTINGS: Settings = SettingsSchema.parse({})
