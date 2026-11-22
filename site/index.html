@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="VALORANT Store Watcher（非公式）のダウンロードと使い方。Riotアカウント連携、Discord Webhook／BOTでの通知設定を初心者向けに説明します。">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="favicon.png">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Store Watcher ガイド</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Noto+Sans+JP:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky table of contents on the left, one reading column of numbered steps on the right (stacks on phones).
+   Single dark theme on purpose: it matches the app the reader is installing. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0f17;
+  --panel: #111824;
+  --panel-2: #172131;
+  --line: #243045;
+  --fg: #ece8e1;
+  --muted: #9aa5b6;
+  --accent: #ff4655;
+  --accent-soft: rgba(255, 70, 85, 0.12);
+  --ok: #2fd6c3;
+  --ok-soft: rgba(47, 214, 195, 0.1);
+  --warn: #ffb020;
+  --warn-soft: rgba(255, 176, 32, 0.1);
+  --font-display: "Chakra Petch", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+  --font-body: "Noto Sans JP", "Yu Gothic UI", "Hiragino Sans", "Meiryo", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Consolas", monospace;
+  --step: 2rem;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.85;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+code, kbd { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 0.88em; background: var(--panel-2); border: 1px solid var(--line); padding: 0.05em 0.4em; border-radius: 3px; }
+kbd { border-bottom-width: 2px; }
+strong { font-weight: 700; color: #fff; }
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* ---------- hero ---------- */
+.hero { border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,70,85,0.08), transparent 70%); margin-top: calc(-1 * env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
+.hero .wrap { padding-block: 3.5rem 3rem; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 2.5rem; align-items: center; }
+.brand { display: flex; align-items: center; gap: 0.7rem; font-family: var(--font-display); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.85rem; color: var(--muted); }
+.brand svg { flex: none; }
+.hero h1 { font-family: var(--font-body); font-weight: 900; font-size: clamp(2rem, 4.6vw, 3.1rem); line-height: 1.25; margin: 1rem 0 1rem; text-wrap: balance; letter-spacing: 0.01em; }
+.hero h1 em { font-style: normal; color: var(--accent); }
+.nb { display: inline-block; }
+.lead { color: var(--muted); font-size: 1.05rem; max-width: 34em; margin: 0; }
+.dl-card { background: var(--panel); border: 1px solid var(--line); padding: 1.6rem; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px)); }
+.dl-btn {
+  display: flex; align-items: center; justify-content: center; gap: 0.7rem;
+  background: var(--accent); color: #fff; text-decoration: none; font-weight: 900; font-size: 1.1rem;
+  padding: 1rem 1.2rem; clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  transition: background 0.15s, transform 0.15s;
+}
+.dl-btn:hover { background: #ff5c69; transform: translateY(-1px); }
+.dl-meta { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 1.1rem 0 0; font-size: 0.85rem; }
+.dl-meta dt { color: var(--muted); }
+.dl-meta dd { margin: 0; }
+.dl-note { font-size: 0.8rem; color: var(--muted); margin: 1rem 0 0; line-height: 1.7; }
+
+/* ---------- body layout ---------- */
+.layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 3rem; padding-block: 2.5rem 5rem; }
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 1.5rem); align-self: start; font-size: 0.9rem; }
+.toc details { border: 1px solid var(--line); background: var(--panel); }
+.toc summary { list-style: none; cursor: pointer; padding: 0.7rem 1rem; font-family: var(--font-display); font-weight: 700; letter-spacing: 0.12em; font-size: 0.75rem; color: var(--muted); text-transform: uppercase; }
+.toc summary::-webkit-details-marker { display: none; }
+.toc ol { list-style: none; margin: 0; padding: 0 0.5rem 0.7rem; counter-reset: toc; }
+.toc li { counter-increment: toc; }
+.toc a { display: flex; gap: 0.6rem; padding: 0.35rem 0.5rem; color: var(--fg); text-decoration: none; border-left: 2px solid transparent; line-height: 1.5; }
+.toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-display); color: var(--muted); font-size: 0.8rem; padding-top: 0.1rem; }
+.toc a:hover { background: var(--panel-2); border-left-color: var(--accent); }
+.toc .extra a::before { content: "—"; }
+
+main { min-width: 0; }
+.chapter { padding-top: 0.5rem; margin-bottom: 4rem; }
+.chapter > header { display: flex; align-items: baseline; gap: 1rem; border-bottom: 1px solid var(--line); padding-bottom: 0.8rem; margin-bottom: 1.6rem; }
+.chapter-no { font-family: var(--font-display); font-weight: 700; font-size: 2.4rem; color: var(--accent); line-height: 1; }
+.chapter h2 { margin: 0; font-size: 1.55rem; font-weight: 900; text-wrap: balance; line-height: 1.4; }
+.chapter h3 { font-size: 1.15rem; margin: 2.4rem 0 0.8rem; font-weight: 700; }
+.chapter p, .chapter li { max-width: 40em; }
+.sub { color: var(--muted); margin-top: -0.6rem; }
+
+/* numbered steps */
+.steps { list-style: none; padding: 0; margin: 1.2rem 0; counter-reset: s; display: grid; gap: 1.1rem; }
+.steps > li { counter-increment: s; position: relative; padding-left: 3rem; max-width: none; }
+.steps > li::before {
+  content: counter(s); position: absolute; left: 0; top: 0.05rem; width: 2rem; height: 2rem;
+  display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 1rem;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--fg);
+}
+.steps > li > p:first-child, .steps > li > strong:first-child { margin-top: 0; }
+.steps p { margin: 0.2rem 0; }
+
+figure { margin: 1rem 0 0.4rem; max-width: 100%; }
+figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); background: var(--panel); }
+figure.narrow img { max-width: min(100%, 520px); }
+figcaption { font-size: 0.8rem; color: var(--muted); margin-top: 0.4rem; }
+
+.callout { border-left: 3px solid var(--line); background: var(--panel); padding: 0.9rem 1.1rem; margin: 1.2rem 0; max-width: 44em; }
+.callout p { margin: 0.3rem 0; }
+.callout-title { font-weight: 700; margin: 0 0 0.2rem; }
+.callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+.callout.danger { border-color: var(--accent); background: var(--accent-soft); }
+.callout.ok { border-color: var(--ok); background: var(--ok-soft); }
+.callout ul { margin: 0.3rem 0; padding-left: 1.2rem; }
+
+.ui { display: inline; font-weight: 700; padding: 0 0.35em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 2px; font-size: 0.92em; line-height: 1.6; box-decoration-break: clone; -webkit-box-decoration-break: clone; overflow-wrap: anywhere; }
+
+/* comparison */
+.choose { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.2rem 0; }
+.choice { background: var(--panel); border: 1px solid var(--line); padding: 1.2rem 1.3rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.choice h4 { margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.tag { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; padding: 0.15rem 0.5rem; border: 1px solid var(--line); color: var(--muted); }
+.tag.rec { color: var(--ok); border-color: rgba(47,214,195,0.5); }
+.choice ul { margin: 0; padding-left: 1.2rem; font-size: 0.92rem; }
+.choice .go { margin-top: auto; font-weight: 700; text-decoration: none; }
+
+.table-wrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 0.92rem; }
+th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--panel-2); font-weight: 700; font-size: 0.82rem; color: var(--muted); }
+tr:last-child td { border-bottom: none; }
+.yes { color: var(--ok); font-weight: 700; }
+.no { color: var(--accent); font-weight: 700; }
+
+.faq details { border: 1px solid var(--line); background: var(--panel); margin: 0.6rem 0; }
+.faq summary { cursor: pointer; padding: 0.8rem 1rem; font-weight: 700; list-style: none; display: flex; gap: 0.6rem; }
+.faq summary::before { content: "Q"; font-family: var(--font-display); color: var(--accent); }
+.faq summary::-webkit-details-marker { display: none; }
+.faq details > div { padding: 0 1rem 0.9rem 2.2rem; color: var(--fg); }
+.faq details > div p { margin: 0.3rem 0; }
+
+.mini-dl { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--accent); color: #fff; text-decoration: none; font-weight: 700; padding: 0.55rem 1rem; }
+.mini-dl:hover { background: #ff5c69; }
+
+footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; }
+footer .wrap { padding-block: 2rem 3rem; }
+footer p { margin: 0.3rem 0; max-width: 60em; }
+
+@media (max-width: 900px) {
+  .hero .wrap { grid-template-columns: minmax(0, 1fr); padding-block: 2.5rem 2rem; gap: 1.8rem; }
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; padding-top: 1.5rem; }
+  .toc { position: static; }
+  .choose { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  body { font-size: 15px; }
+  .steps > li { padding-left: 2.6rem; }
+  .chapter-no { font-size: 2rem; }
+}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <div class="brand">
+        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4 28 16 16 28 4 16z" fill="none" stroke="#ff4655" stroke-width="2.4"/><path d="M16 1v6M16 25v6M1 16h6M25 16h6" stroke="#ece8e1" stroke-width="1.8"/><circle cx="16" cy="16" r="2.4" fill="#ff4655"/></svg>
+        Store Watcher ・ 使い方ガイド
+      </div>
+      <h1><span class="nb">欲しいスキンが</span><span class="nb">ストアに並んだら、</span><em class="nb">Discordでお知らせ。</em></h1>
+      <p class="lead">VALORANTのデイリーストアを毎朝チェックして、ウィッシュリストに入れたスキンが出たら画像付きでDiscordに届けるWindows用アプリです。このページでは、インストールから毎日の使い方まで順番に説明します。</p>
+    </div>
+    <div class="dl-card">
+      <a class="dl-btn" href="https://github.com/MMMMXIV/valorant-store-watcher/releases/latest/download/VALORANT-Store-Watcher-Setup.exe" target="_blank" rel="noopener">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M6 11l6 6 6-6M4 21h16"/></svg>
+        最新版をダウンロード
+      </a>
+      <dl class="dl-meta">
+        <dt>ファイル</dt><dd><code>VALORANT-Store-Watcher-Setup.exe</code></dd>
+        <dt>サイズ</dt><dd>約 100 MB</dd>
+        <dt>対応OS</dt><dd>Windows 10 / 11（64bit）</dd>
+        <dt>料金</dt><dd>無料</dd>
+      </dl>
+      <p class="dl-note">ボタンを押すと、いつでも<strong>その時点の最新版</strong>がダウンロードされます。一度入れれば、次からはアプリの中の更新ボタンで新しい版にできます。</p>
+    </div>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <nav class="toc" aria-label="目次">
+    <details id="toc" open>
+      <summary>目次</summary>
+      <ol>
+        <li><a href="#install">ダウンロードとインストール</a></li>
+        <li><a href="#first">はじめての起動</a></li>
+        <li><a href="#wishlist">欲しいスキンを登録する</a></li>
+        <li><a href="#riot">自分のストアを取得する</a></li>
+        <li><a href="#notify">通知の受け取り方を選ぶ</a></li>
+        <li><a href="#daily">毎日の使い方</a></li>
+        <li><a href="#update">アップデート</a></li>
+        <li><a href="#trouble">困ったとき</a></li>
+      </ol>
+      <ol class="extra">
+        <li><a href="#safety">安全に使うために</a></li>
+      </ol>
+    </details>
+  </nav>
+
+  <main>
+    <!-- 01 -->
+    <section class="chapter" id="install">
+      <header><span class="chapter-no">01</span><h2>ダウンロードとインストール</h2></header>
+      <ol class="steps">
+        <li>
+          <p>ページ上の <span class="ui">最新版をダウンロード</span> ボタンを押します。ブラウザの「ダウンロード」に <code>VALORANT-Store-Watcher-Setup.exe</code> が保存されます。</p>
+          <p class="sub">ブラウザが「一般的にダウンロードされていません」などと表示したら、メニューから <span class="ui">保存</span>（または <span class="ui">保持する</span>）を選んでください。</p>
+        </li>
+        <li>
+          <p>ダウンロードしたファイルをダブルクリックします。</p>
+        </li>
+        <li>
+          <p>青い画面で「<strong>WindowsによってPCが保護されました</strong>」と出たら、<span class="ui">詳細情報</span> を押してから <span class="ui">実行</span> を押します。</p>
+          <p class="sub">個人で作ったアプリで「デジタル署名」を付けていないために出る表示です。</p>
+        </li>
+        <li>
+          <p>インストーラーの案内に沿って <span class="ui">次へ</span> を押していき、最後に <span class="ui">完了</span> を押します。管理者権限（パスワード）は必要ありません。</p>
+        </li>
+        <li>
+          <p>デスクトップにできた <strong>VALORANT Store Watcher</strong> のアイコンから起動します。</p>
+        </li>
+      </ol>
+      <div class="callout">
+        <p class="callout-title">アンインストールするには</p>
+        <p>Windowsの <span class="ui">設定</span> → <span class="ui">アプリ</span> → <span class="ui">インストールされているアプリ</span> から削除できます。途中で「ユーザーデータも削除しますか？」と聞かれたら、ウィッシュリストや履歴も消したい場合だけ <span class="ui">はい</span> を選びます。</p>
+      </div>
+    </section>
+
+    <!-- 02 -->
+    <section class="chapter" id="first">
+      <header><span class="chapter-no">02</span><h2>はじめての起動</h2></header>
+      <p>初めて起動すると、スキンの名前と画像を数秒で読み込みます（インターネット接続が必要です）。この時点ではまだRiotアカウントとつないでいないので、ダッシュボードに「Riotアカウント連携が未設定です」と表示されます。これで正常です。</p>
+      <figure>
+        <img src="img/14-dashboard-login-needed.png" alt="初回起動直後のダッシュボード。ストア欄に『Riotアカウント連携が未設定です』と設定を開くボタンが表示されている" width="1360" height="860" loading="lazy">
+        <figcaption>はじめての起動直後。ストアを取得する準備ができていないことが赤い枠で表示されます。</figcaption>
+      </figure>
+      <p>このあと、<a href="#wishlist">欲しいスキンの登録</a> → <a href="#riot">Riotアカウントとの連携</a> → <a href="#notify">通知の設定</a> の順に進めます。全部で10分ほどです。</p>
+    </section>
+
+    <!-- 03 -->
+    <section class="chapter" id="wishlist">
+      <header><span class="chapter-no">03</span><h2>欲しいスキンを登録する</h2></header>
+      <ol class="steps">
+        <li>
+          <p>左のメニューから <span class="ui">スキンカタログ</span> を開きます。</p>
+        </li>
+        <li>
+          <p>上の検索欄にスキン名を入れます。日本語でも英語でも探せます（例：<code>リーヴァー</code>、<code>Reaver</code>、<code>プライム ヴァンダル</code>）。武器の名前のボタンで絞り込むこともできます。</p>
+          <figure>
+            <img src="img/03-catalog-search.png" alt="スキンカタログで『リーヴァー』を検索した画面。リーヴァーシリーズのスキンがカードで並んでいる" width="1360" height="860" loading="lazy">
+          </figure>
+        </li>
+        <li>
+          <p>欲しいスキンのカードにある <span class="ui">ウィッシュリストに追加</span> を押します。登録済みのカードは <span class="ui">登録済み</span> に変わります。いくつでも登録できます。</p>
+        </li>
+        <li>
+          <p>左のメニューの <span class="ui">ウィッシュリスト</span> で一覧を確認できます。<strong>高・中・低</strong> のボタンで優先度を決められ、上にあるほど通知の中で先に表示されます。並び順はドラッグか ▲▼ ボタンで変えられます。</p>
+          <figure>
+            <img src="img/04-wishlist.png" alt="ウィッシュリスト画面。登録したスキンが並び、右側に高・中・低の優先度ボタンと削除ボタンがある" width="1360" height="860" loading="lazy">
+          </figure>
+        </li>
+      </ol>
+    </section>
+
+    <!-- 04 -->
+    <section class="chapter" id="riot">
+      <header><span class="chapter-no">04</span><h2>自分のストアを取得する（Riotアカウント連携）</h2></header>
+      <div class="callout danger">
+        <p class="callout-title">はじめにお読みください</p>
+        <ul>
+          <li>Riot Games の公式の仕組みには、個人のデイリーストアを見る方法がありません。このアプリはゲームが内部で使っている<strong>非公開の仕組み</strong>を使う、<strong>非公式な方法</strong>でストアを取得します。</li>
+          <li>Riotの利用規約に反する可能性があり、<strong>アカウントに制限がかかる可能性はゼロではありません</strong>。また、Riot側の変更で突然使えなくなることがあります。</li>
+          <li><strong>Riotのパスワードはアプリに渡りません。</strong>ログインはRiot公式のログインページで行い、アプリが保存するのはログイン後にRiotが発行する「ログイン情報（Cookie）」だけです。これはWindowsの暗号化機能で守られます。</li>
+          <li>このログイン情報はパスワードと同じくらい大切なものです。<strong>自分のアカウントだけで使い、他の人には渡さないでください。</strong></li>
+        </ul>
+      </div>
+      <ol class="steps">
+        <li>
+          <p>左のメニューの <span class="ui">設定</span> を開き、いちばん上の「Riotアカウント連携（非公式）」の説明を読みます。納得できたらチェックを入れ、<span class="ui">同意して有効にする</span> を押します。</p>
+          <figure class="narrow">
+            <img src="img/02-riot-consent.png" alt="Riotアカウント連携の同意画面。リスクの説明と、同意のチェックボックス、同意して有効にするボタン" width="513" height="485" loading="lazy">
+          </figure>
+        </li>
+        <li>
+          <p><span class="ui">Riot公式ページでログイン</span> を押します。別のウィンドウでRiotのログイン画面が開きます。</p>
+          <figure class="narrow">
+            <img src="img/05-riot-login-button.png" alt="同意後のRiotアカウント連携欄。Riot公式ページでログインのボタンが表示されている" width="513" height="551" loading="lazy">
+          </figure>
+          <p class="sub">ウィンドウのタイトルが「🔒 auth.riotgames.com — Riot公式ログインページ」になっていることを確認してください。Riotの本物のページである目印です。</p>
+        </li>
+        <li>
+          <p>RiotのIDとパスワードを入れてログインします。<strong>「ログイン状態を保持する（Stay signed in）」に必ずチェック</strong>を入れてください。2段階認証を使っている場合は、メールやアプリに届いたコードもそのページに入力します。</p>
+          <div class="callout ok">
+            <p class="callout-title">「ログイン状態を保持する」が大事な理由</p>
+            <p>ここにチェックを入れると、Riotのログインが長持ちします。アプリは自動でログインを更新し続け、期限が切れても裏で自動的にログインし直すので、<strong>ふだんは一度ログインすれば何もしなくて大丈夫</strong>です。</p>
+          </div>
+        </li>
+        <li>
+          <p>ログインが終わるとウィンドウが自動で閉じます。設定画面に「ログイン済み」とあなたのRiot IDが表示され、すぐに今日のストアを取りに行きます。</p>
+          <figure class="narrow">
+            <img src="img/06-riot-logged-in.png" alt="ログイン済みのRiotアカウント連携欄。Riot IDと地域APが表示されている" width="513" height="619" loading="lazy">
+            <figcaption>地域は自動で判定されます。日本のアカウントは「AP」です。</figcaption>
+          </figure>
+        </li>
+      </ol>
+      <div class="callout">
+        <p class="callout-title">ログインのウィンドウがうまく開かないとき</p>
+        <p>設定画面の <span class="ui">ログインウィンドウがうまく動かない場合（ssid を貼り付け）</span> を開くと、普段使っているブラウザでログインして、ログイン情報（<code>ssid</code>）を貼り付ける方法が使えます。手順はアプリの画面に書いてあります。</p>
+      </div>
+    </section>
+
+    <!-- 05 -->
+    <section class="chapter" id="notify">
+      <header><span class="chapter-no">05</span><h2>通知の受け取り方を選ぶ</h2></header>
+      <p>Discordへの届け方は2種類あります。どちらか一方を選んでください。あとからいつでも切り替えられます。</p>
+      <div class="choose">
+        <div class="choice">
+          <h4>Webhook <span class="tag rec">かんたん</span></h4>
+          <p>自分のDiscordサーバーの<strong>チャンネル</strong>に投稿されます。</p>
+          <ul>
+            <li>設定は URL を1つ貼るだけ</li>
+            <li>自分がサーバーの管理者である必要があります</li>
+            <li>仲間のサーバーのチャンネルで共有することもできます</li>
+          </ul>
+          <a class="go" href="#webhook">Webhookの設定へ →</a>
+        </div>
+        <div class="choice">
+          <h4>BOT（DM） <span class="tag">サーバー不要</span></h4>
+          <p>自分専用のBOTから、<strong>自分個人のDM</strong>に届きます。</p>
+          <ul>
+            <li>サーバーを持っていなくても使えます</li>
+            <li>BOTを作る手順が少し多め（5分ほど）</li>
+            <li>スマホのDiscordにも通知が届きます</li>
+          </ul>
+          <a class="go" href="#bot">BOTの設定へ →</a>
+        </div>
+      </div>
+
+      <h3 id="webhook">A. Webhook で受け取る</h3>
+      <ol class="steps">
+        <li>
+          <p>Discordで、通知を受け取りたいサーバーの<strong>チャンネル名の横の歯車</strong>（チャンネルの編集）を押します。</p>
+        </li>
+        <li>
+          <p><span class="ui">連携サービス</span> → <span class="ui">ウェブフック</span> → <span class="ui">新しいウェブフック</span> を押します。</p>
+        </li>
+        <li>
+          <p>できたウェブフックを開き、名前を「Store Watcher」などにして、<span class="ui">ウェブフックURLをコピー</span> を押します。</p>
+        </li>
+        <li>
+          <p>アプリの <span class="ui">設定</span> → <span class="ui">Discord 通知先</span> で <strong>Webhook（サーバーのチャンネル）</strong> を選び、コピーしたURLを貼り付けて <span class="ui">保存</span> を押します。</p>
+          <figure class="narrow">
+            <img src="img/07-notify-webhook.png" alt="Discord通知先の設定。Webhookが選ばれ、URLの入力欄と保存・テスト通知ボタンがある" width="513" height="436" loading="lazy">
+          </figure>
+        </li>
+        <li>
+          <p><span class="ui">テスト通知</span> を押して、チャンネルに「✅ テスト通知です」と届けば完了です。</p>
+        </li>
+      </ol>
+      <div class="callout warn">
+        <p>ウェブフックのURLを知っている人は、誰でもそのチャンネルに書き込めます。URLは人に見せないでください。うっかり見せてしまったら、Discord側でそのウェブフックを削除して作り直します。</p>
+      </div>
+
+      <h3 id="bot">B. BOT で自分のDMに受け取る</h3>
+      <ol class="steps">
+        <li>
+          <p>パソコンのブラウザで <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">Discord Developer Portal</a> を開き、Discordのアカウントでログインします。</p>
+        </li>
+        <li>
+          <p>右上の <span class="ui">New Application</span> を押し、好きな名前（例：<code>ストア通知</code>）を入れて作成します。</p>
+        </li>
+        <li>
+          <p>左のメニューの <span class="ui">Bot</span> を開き、<span class="ui">Reset Token</span> を押してトークン（長い文字列）をコピーします。</p>
+          <p class="sub">トークンはパスワードと同じです。人に見せたり、チャットに貼ったりしないでください。</p>
+        </li>
+        <li>
+          <p>Discordアプリで <span class="ui">ユーザー設定</span> → <span class="ui">詳細設定</span> → <span class="ui">開発者モード</span> をオンにします。そのあと、自分のアイコンを右クリックして <span class="ui">ユーザーIDをコピー</span> を押します（数字が18桁前後並んだものです）。</p>
+        </li>
+        <li>
+          <p>アプリの <span class="ui">設定</span> → <span class="ui">Discord 通知先</span> で <strong>BOT（自分へのDM）</strong> を選び、トークンとユーザーIDを入れて <span class="ui">保存</span> を押します。トークンが正しいかはその場で確認されます。</p>
+          <figure class="narrow">
+            <img src="img/08-notify-bot.png" alt="Discord通知先でBOTを選んだ画面。トークンとユーザーIDの入力欄、BOTを追加するための2つのボタンがある" width="513" height="761" loading="lazy">
+          </figure>
+        </li>
+        <li>
+          <p>保存すると、BOTとあなたをつなぐボタンが2つ出ます。まず <span class="ui">① 自分のアカウントに追加（サーバー不要）</span> を押し、ブラウザで出る画面で許可します。</p>
+        </li>
+        <li>
+          <p><span class="ui">テスト通知</span> を押して、DMにテストのメッセージが届けば完了です。</p>
+          <div class="callout">
+            <p class="callout-title">「共通のサーバーがありません」と出たら</p>
+            <p>Discordの仕組み上、BOTとあなたが同じサーバーにいないとDMが届かない場合があります。そのときは、Discordで<strong>自分しかいない小さなサーバー</strong>を作り、<span class="ui">② 自分専用サーバーに招待</span> でBOTをそこに入れてから、もう一度 <span class="ui">テスト通知</span> を押してください。サーバーは置いておくだけで、使う必要はありません。</p>
+          </div>
+        </li>
+      </ol>
+
+      <h3>どんなときに通知するか</h3>
+      <p><span class="ui">設定</span> → <span class="ui">通知条件</span> で選べます。ふつうは最初のままで大丈夫です。</p>
+      <figure class="narrow">
+        <img src="img/09-notify-conditions.png" alt="通知条件の設定。Discord通知を有効にする、ウィッシュリスト一致時に通知、毎日のストア全体を通知、エラー発生時に通知のスイッチ" width="513" height="333" loading="lazy">
+      </figure>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>スイッチ</th><th>オンにすると</th></tr></thead>
+          <tbody>
+            <tr><td>ウィッシュリスト一致時に通知</td><td>登録したスキンがストアに出た日だけ、画像付きで届きます（おすすめ）</td></tr>
+            <tr><td>毎日のストア全体を通知</td><td>一致がなくても、毎日その日の4スキンが届きます</td></tr>
+            <tr><td>エラー発生時に通知</td><td>ストアを取れなかったときにお知らせします（1日1回まで）</td></tr>
+            <tr><td>Discord通知を有効にする</td><td>オフにすると、すべての通知を止めます（ストアの記録は続きます）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 06 -->
+    <section class="chapter" id="daily">
+      <header><span class="chapter-no">06</span><h2>毎日の使い方</h2></header>
+      <p>ここまで設定すれば、あとは<strong>何もしなくて大丈夫</strong>です。アプリは毎朝ストアが新しくなったあと（日本時間 9時ごろ）に自動でチェックし、ウィッシュリストのスキンが出ていれば通知します。</p>
+      <figure>
+        <img src="img/13-dashboard.png" alt="ダッシュボード。本日のストアの4スキンが価格付きで並び、ウィッシュリストと一致した2つに赤い枠とWISHLISTの印がついている" width="1360" height="860" loading="lazy">
+        <figcaption>ダッシュボード。ウィッシュリストと一致したスキンは赤い枠で表示されます。</figcaption>
+      </figure>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>画面の場所</th><th>わかること・できること</th></tr></thead>
+          <tbody>
+            <tr><td>監視状態</td><td>「監視中」なら正常です。「要対応」のときは、下のストア欄に理由が出ます</td></tr>
+            <tr><td>次回チェック予定</td><td>次に自動でストアを見に行く時刻</td></tr>
+            <tr><td>本日のストア</td><td>今日の4スキンと価格（VP）</td></tr>
+            <tr><td><span class="ui">今すぐチェック</span></td><td>すぐにストアを確認します（同じ日の通知が2回届くことはありません）</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>ウィンドウを閉じても動き続けます</h3>
+      <p>右上の × でウィンドウを閉じても、画面右下の<strong>タスクトレイ</strong>（時計の近くのアイコン）で監視を続けます。アプリを完全に終わらせたいときは、トレイのアイコンを右クリックして <span class="ui">終了</span> を選びます。</p>
+
+      <h3>パソコンを起動したら自動で始める</h3>
+      <p><span class="ui">設定</span> → <span class="ui">Windows</span> の <span class="ui">Windowsログイン時に自動起動</span> をオンにすると、パソコンを付けたときに自動でトレイに入って監視を始めます。</p>
+      <figure class="narrow">
+        <img src="img/12-windows.png" alt="Windowsの設定。ログイン時に自動起動、自動起動時はウィンドウを表示しない、閉じてもトレイで監視を続けるのスイッチ" width="513" height="246" loading="lazy">
+      </figure>
+
+      <div class="callout warn">
+        <p class="callout-title">パソコンが止まっている間はチェックできません</p>
+        <p>このアプリはあなたのパソコンの上で動きます。電源が切れている間やスリープ中はストアを見られません。次にパソコンを付けたとき、まだ確認していないストアがあれば<strong>すぐに自動で確認</strong>します。</p>
+      </div>
+
+      <h3>チェックする時刻を変える</h3>
+      <p>ふつうは変える必要はありません。アプリはストアの更新時刻をRiotから受け取り、その5分後にチェックします。更新時刻が分からないときは、<span class="ui">設定</span> → <span class="ui">自動チェック</span> の「チェック時刻」（最初は 9:05）に確認します。</p>
+    </section>
+
+    <!-- 07 -->
+    <section class="chapter" id="update">
+      <header><span class="chapter-no">07</span><h2>アップデート</h2></header>
+      <p>新しい版が出ると、Windowsの通知とダッシュボードでお知らせします。</p>
+      <ol class="steps">
+        <li><p><span class="ui">設定</span> → <span class="ui">アップデート</span> を開きます。</p></li>
+        <li><p><span class="ui">ダウンロード</span> を押し、終わったら <span class="ui">再起動して更新</span> を押します。</p></li>
+      </ol>
+      <figure class="narrow">
+        <img src="img/11-update.png" alt="アップデートの設定欄。現在のバージョンと、更新を確認ボタン" width="513" height="192" loading="lazy">
+      </figure>
+      <p>ウィッシュリスト、履歴、設定、Riotのログイン状態はそのまま引き継がれます。もし更新ボタンがうまく動かないときは、このページの <a class="mini-dl" href="https://github.com/MMMMXIV/valorant-store-watcher/releases/latest/download/VALORANT-Store-Watcher-Setup.exe" target="_blank" rel="noopener">最新版をダウンロード</a> から入れ直しても、データは消えません。</p>
+    </section>
+
+    <!-- 08 -->
+    <section class="chapter" id="trouble">
+      <header><span class="chapter-no">08</span><h2>困ったとき</h2></header>
+      <div class="faq">
+        <details open>
+          <summary>「Riotへの再ログインが必要です」と出た</summary>
+          <div>
+            <p>Riotのログインの期限が切れ、アプリの自動ログインでも戻せなかったときに出ます。Windowsの通知をクリックするか、<span class="ui">設定</span> → <span class="ui">Riotに再ログイン</span> を押してください。多くの場合はボタンを押すだけで終わります。</p>
+            <p>次回からは、Riotのログイン画面で「ログイン状態を保持する」にチェックを入れると、ほとんど出なくなります。</p>
+          </div>
+        </details>
+        <details>
+          <summary>ダッシュボードに「ストアを取得できませんでした」と出た</summary>
+          <div>
+            <p>理由と、次に自動でやり直す時刻が表示されます。VALORANTのメンテナンス中や、一時的な通信の不調ならそのまま待てば直ります。すぐ試したいときは <span class="ui">再試行</span> を押します。</p>
+          </div>
+        </details>
+        <details>
+          <summary>通知が来ない</summary>
+          <div>
+            <p>次の順に確かめてください。</p>
+            <p>① <span class="ui">設定</span> の「Discord 通知先」が「設定済み」になっているか　② <span class="ui">テスト通知</span> が届くか　③「通知条件」のスイッチがオンか　④ 左メニュー <span class="ui">履歴</span> の「Discord通知履歴」「エラー履歴」に何か出ていないか</p>
+            <p>送れなかった通知は、次のチェックのときに自動でもう一度送られます。</p>
+          </div>
+        </details>
+        <details>
+          <summary>同じスキンがまた出たのに通知されない</summary>
+          <div>
+            <p>同じ日のストア（朝9時から翌朝9時まで）では1回だけ通知します。次の日以降にまた出たときは、もう一度通知されます。</p>
+          </div>
+        </details>
+        <details>
+          <summary>画面に「テストモード」と出ている</summary>
+          <div>
+            <p><span class="ui">設定</span> → <span class="ui">ストア取得方法</span> が「テスト用ストア」になっています。表示されているのは本物ではない練習用のストアです。<strong>Riotアカウント</strong> を選び直してください。</p>
+          </div>
+        </details>
+        <details>
+          <summary>サポートに伝える情報を集めたい</summary>
+          <div>
+            <p><span class="ui">設定</span> のいちばん下の <span class="ui">診断情報を表示</span> を押すと、動作の記録（ログ）が出ます。トークンやパスワードなどの大事な情報は自動で隠されるので、そのまま送って大丈夫です。</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="chapter" id="safety">
+      <header><span class="chapter-no">—</span><h2>安全に使うために</h2></header>
+      <ul>
+        <li>このアプリは<strong>Riotのパスワードを受け取りません</strong>。「パスワードを入れれば自動で取れる」とうたう他のツールやBOTには、パスワードを渡さないでください。</li>
+        <li>アプリが保存するRiotのログイン情報、Webhook URL、BOTトークンは、すべてWindowsの暗号化機能で守られ、画面にもう一度表示されることはありません。</li>
+        <li>使うのは<strong>自分のアカウントだけ</strong>にしてください。他の人のログイン情報を預かったり、自分のログイン情報を渡したりしないでください。</li>
+        <li><span class="ui">設定</span> → <span class="ui">連携解除</span> を押すと、保存されたRiotのログイン情報はすべて削除されます。</li>
+      </ul>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>VALORANT Store Watcher は個人が作った非公式のツールで、Riot Games とは関係ありません。Riot Games が承認・推奨しているものでもありません。</p>
+    <p>VALORANT および関連する名前や画像は Riot Games, Inc. の商標または登録商標です。スキンの名前と画像は、有志が運営する非公式サービス Valorant-API から取得しています。</p>
+  </div>
+</footer>
+
+<script>
+  // On phones the table of contents starts folded so the first step is visible right away.
+  (function () {
+    var toc = document.getElementById('toc');
+    if (toc && window.matchMedia('(max-width: 900px)').matches) toc.removeAttribute('open');
+    if (toc) toc.addEventListener('click', function (e) {
+      if (e.target.closest('a') && window.matchMedia('(max-width: 900px)').matches) toc.removeAttribute('open');
+    });
+  })();
+</script>
+
+</body>
+</html>
