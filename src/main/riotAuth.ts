@@ -51,9 +51,12 @@ export const electronAuthorize: AuthorizeFn = (url, cookie) =>
  * "stay signed in" / trusted-device state survives and re-login is usually one click
  * or fully silent. Wiped on logout.
  */
-const LOGIN_PARTITION = 'persist:riot-login'
-function loginSession(): Session {
-  const ses = session.fromPartition(LOGIN_PARTITION)
+/** Each Riot account gets its own remembered browser session (the first one keeps the v1.x name). */
+export function loginPartition(accountKey: string): string {
+  return accountKey === 'main' ? 'persist:riot-login' : `persist:riot-login-${accountKey.replace(/[^\w-]/g, '')}`
+}
+function loginSession(partition: string): Session {
+  const ses = session.fromPartition(partition)
   ses.setUserAgent(browserUserAgent())
   ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
   return ses
@@ -88,15 +91,16 @@ async function restoreCookies(ses: Session, jar: CookieJar | null): Promise<void
  * and cookies are returned; if Riot shows its login form, returns null (the user must log in).
  * Nothing is typed or clicked automatically.
  */
-export function silentRiotLogin(saved: CookieJar | null, timeoutMs = 25_000): Promise<{ redirectUrl: string; cookies: CookieJar } | null> {
-  return new Promise((resolve) => void restoreCookies(loginSession(), saved).finally(() => run(resolve)))
+export function silentRiotLogin(accountKey: string, saved: CookieJar | null, timeoutMs = 25_000): Promise<{ redirectUrl: string; cookies: CookieJar } | null> {
+  const partition = loginPartition(accountKey)
+  return new Promise((resolve) => void restoreCookies(loginSession(partition), saved).finally(() => run(resolve)))
   function run(resolve: (v: { redirectUrl: string; cookies: CookieJar } | null) => void): void {
-    const ses = loginSession()
+    const ses = loginSession(partition)
     const win = new BrowserWindow({
       show: false,
       width: 480,
       height: 720,
-      webPreferences: { partition: LOGIN_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false }
+      webPreferences: { partition, sandbox: true, contextIsolation: true, nodeIntegration: false }
     })
     let done = false
     const finish = async (url: string | null) => {
@@ -135,17 +139,22 @@ export function silentRiotLogin(saved: CookieJar | null, timeoutMs = 25_000): Pr
  * no script and never reads the form. When Riot redirects to playvalorant.com/opt_in,
  * the token URL and the auth.riotgames.com cookies are captured and the session is wiped.
  */
-export async function openRiotLoginWindow(parent: BrowserWindow | null, saved: CookieJar | null = null): Promise<{ redirectUrl: string; cookies: CookieJar }> {
-  await restoreCookies(loginSession(), saved)
+export async function openRiotLoginWindow(
+  parent: BrowserWindow | null,
+  accountKey: string,
+  saved: CookieJar | null = null,
+  windowTitle = 'Riotにログイン'
+): Promise<{ redirectUrl: string; cookies: CookieJar }> {
+  const partition = loginPartition(accountKey)
+  await restoreCookies(loginSession(partition), saved)
   return new Promise((resolve, reject) => {
-    const partition = LOGIN_PARTITION
-    const ses = loginSession()
+    const ses = loginSession(partition)
     const win = new BrowserWindow({
       width: 520,
       height: 780,
       parent: parent ?? undefined,
       modal: false,
-      title: 'Riotにログイン',
+      title: windowTitle,
       autoHideMenuBar: true,
       backgroundColor: '#111111',
       webPreferences: { partition, sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false }
@@ -185,7 +194,7 @@ export async function openRiotLoginWindow(parent: BrowserWindow | null, saved: C
       e.preventDefault()
       try {
         const host = new URL(win.webContents.getURL()).host
-        win.setTitle(`🔒 ${host} — Riot公式ログインページ`)
+        win.setTitle(`🔒 ${host} — Riot公式ログインページ ・ ${windowTitle}`)
       } catch {
         /* ignore */
       }
@@ -195,7 +204,11 @@ export async function openRiotLoginWindow(parent: BrowserWindow | null, saved: C
   })
 }
 
-export async function wipeRiotSessions(): Promise<void> {
+/** Wipes the remembered Riot browser session of one account. */
+export async function wipeRiotSession(accountKey: string): Promise<void> {
+  await session.fromPartition(loginPartition(accountKey)).clearStorageData().catch(() => undefined)
+}
+
+export async function wipeRiotApiSession(): Promise<void> {
   await riotApiSession().clearStorageData().catch(() => undefined)
-  await session.fromPartition(LOGIN_PARTITION).clearStorageData().catch(() => undefined)
 }

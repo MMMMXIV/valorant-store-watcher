@@ -24,14 +24,31 @@ export interface AppState {
   latestStore: StoredSnapshot | null
   latestIsCurrent: boolean
   matchedSkinIds: string[]
+  accountStores: Array<{ key: string; label: string; store: StoredSnapshot | null; matchedSkinIds: string[]; isCurrent: boolean }>
   wishlistCount: number
   catalog: { skinCount: number; version: string | null; updatedAt: string | null }
   webhookConfigured: boolean
   discordBot: { configured: boolean; userId: string | null; app: { id: string; name: string } | null; links: { userInstall: string; serverInvite: string } | null }
   notifierConfigured: boolean
-  riot: { loggedIn: boolean; needsRelogin: boolean; account: { puuid: string; gameName: string | null; region: string | null } | null }
+  riot: {
+    loggedIn: boolean
+    needsRelogin: boolean
+    account: { puuid: string; gameName: string | null; region: string | null } | null
+    maxAccounts: number
+    accounts: RiotAccount[]
+  }
   secureStorageAvailable: boolean
   lastRun: CheckRun | null
+}
+
+export interface RiotAccount {
+  key: string
+  label: string
+  gameName: string | null
+  region: string | null
+  regionOverride: string
+  loggedIn: boolean
+  needsRelogin: boolean
 }
 
 export interface UpdateState {
@@ -103,8 +120,11 @@ interface VswApi {
   }
   update: { check(): Promise<UpdateState>; download(): Promise<UpdateState>; install(): Promise<void> }
   riot: {
-    login(): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>
-    loginWithSsid(ssid: string): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>
+    login(key?: string, label?: string): Promise<{ account: { key: string; label: string } | null; check: CheckSummary }>
+    loginWithSsid(ssid: string, key?: string, label?: string): Promise<{ account: { key: string; label: string } | null; check: CheckSummary }>
+    rename(key: string, label: string): Promise<boolean>
+    setRegion(key: string, region: string): Promise<boolean>
+    removeAccount(key: string): Promise<boolean>
     logout(): Promise<boolean>
   }
   onStateChanged(cb: () => void): () => void

@@ -60,22 +60,23 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out
 }
 
-export function buildWishlistPayloads(matches: MatchResult[], tz: string, periodDate: Date): Array<{ payload: DiscordPayload; skinIds: string[] }> {
+export function buildWishlistPayloads(matches: MatchResult[], tz: string, periodDate: Date, accountLabel?: string | null): Array<{ payload: DiscordPayload; skinIds: string[] }> {
+  const who = accountLabel ? `【${accountLabel}】` : ''
   return chunk(matches, 10).map((part, i) => ({
     skinIds: part.map((m) => m.offer.skinId!),
     payload: {
       username: 'VALORANT Store Watcher',
-      content: i === 0 ? `${HEADER}\nウィッシュリストのスキンがストアに登場しました！（${matches.length}件）` : undefined,
+      content: i === 0 ? `${HEADER}\n${who}ウィッシュリストのスキンがストアに登場しました！（${matches.length}件）` : undefined,
       embeds: part.map((m) => skinEmbed(m.offer, tz, periodDate, m.wish.priority)),
       allowed_mentions: { parse: [] }
     }
   }))
 }
 
-export function buildDailyPayload(offers: ResolvedOffer[], tz: string, periodDate: Date, matchedIds: Set<string>): DiscordPayload {
+export function buildDailyPayload(offers: ResolvedOffer[], tz: string, periodDate: Date, matchedIds: Set<string>, accountLabel?: string | null): DiscordPayload {
   return {
     username: 'VALORANT Store Watcher',
-    content: `${HEADER}\n📅 ${formatZonedDate(periodDate, tz)} のストア`,
+    content: `${HEADER}\n📅 ${formatZonedDate(periodDate, tz)} のストア${accountLabel ? `（${accountLabel}）` : ''}`,
     embeds: offers.slice(0, 10).map((o) => {
       const e = skinEmbed(o, tz, periodDate)
       if (o.skinId && matchedIds.has(o.skinId)) e.title = `⭐ ${e.title}（ウィッシュリスト）`

@@ -127,6 +127,31 @@ export function Dashboard({ go }: { go: (p: Page) => void }) {
               </>
             }
           />
+        ) : isRiot && state.accountStores.length ? (
+          <div className="space-y-5">
+            {state.accountStores.map((acc) => {
+              const am = new Set(acc.matchedSkinIds)
+              return (
+                <div key={acc.key}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="inline-block h-3 w-1 bg-crimson" />
+                    <span className="text-sm font-bold">{acc.label}</span>
+                    {acc.matchedSkinIds.length > 0 && <Badge tone="red">一致 {acc.matchedSkinIds.length}</Badge>}
+                    {acc.store && <span className="text-xs text-mute">{fmtDate(periodDay(acc.store), s.timezone)}</span>}
+                  </div>
+                  {acc.store ? (
+                    <div className="grid grid-cols-4 gap-4">
+                      {acc.store.offers.map((o) => (
+                        <StoreSkinCard key={o.slot} slot={o.slot} skin={o.skin} price={o.price} matched={!!o.skinId && am.has(o.skinId)} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="border border-ink-700 py-6 text-center text-sm text-mute">このアカウントのストアはまだ取得していません</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         ) : store ? (
           <div className="grid grid-cols-4 gap-4">
             {store.offers.map((o) => (

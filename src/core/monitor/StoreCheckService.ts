@@ -8,7 +8,7 @@ import {
   type DiscordPayload,
   type SendOptions
 } from '../notify/discord'
-import type { ProviderContext, StoreProvider } from '../providers/StoreProvider'
+import { isMultiStoreProvider, type ProviderContext, type StoreProvider } from '../providers/StoreProvider'
 import { computePeriodKey } from '../providers/period'
 import type { CheckTrigger, MatchResult, StoredSnapshot, StoreSnapshot } from '../types'
 import type { Settings } from '../settings'
@@ -99,7 +99,7 @@ export class StoreCheckService {
    * Builds the Windows toast notices for a run, deduplicated per store period so repeated
    * checks on the same day never re-notify. Records them immediately (kinds desktop-wishlist / desktop-store).
    */
-  private buildDesktop(accountId: string, periodKey: string, matches: MatchResult[], storeCount: number, settings: Settings): DesktopNotice[] {
+  private buildDesktop(accountId: string, periodKey: string, matches: MatchResult[], storeCount: number, settings: Settings, accountLabel?: string | null): DesktopNotice[] {
     const out: DesktopNotice[] = []
     const now = () => this.now().toISOString()
     if (settings.desktopNotifyWishlist) {
@@ -107,23 +107,73 @@ export class StoreCheckService {
       for (const m of fresh) this.deps.repos.notifications.record(accountId, periodKey, m.offer.skinId!, 'desktop-wishlist', true, 0, null)
       if (fresh.length) {
         const names = fresh.map((m) => m.offer.skin?.nameJa ?? '不明なスキン')
+        const who = accountLabel ? `${accountLabel}: ` : ''
         out.push({
           kind: 'wishlist',
           title: '🎯 ウィッシュリストのスキンがストアに登場！',
-          body: names.length === 1 ? `${names[0]} が今日のストアにあります` : `${names.slice(0, 3).join('、')}${names.length > 3 ? ` ほか${names.length - 3}件` : ''} が今日のストアにあります`
+          body: who + (names.length === 1 ? `${names[0]} が今日のストアにあります` : `${names.slice(0, 3).join('、')}${names.length > 3 ? ` ほか${names.length - 3}件` : ''} が今日のストアにあります`)
         })
       }
     }
     if (settings.desktopNotifyStore && !this.deps.repos.notifications.wasSent(accountId, periodKey, '', 'desktop-store')) {
       this.deps.repos.notifications.record(accountId, periodKey, '', 'desktop-store', true, 0, null)
       void now()
+      const who = accountLabel ? `${accountLabel}: ` : ''
       out.push({
         kind: 'store',
         title: '🛒 本日のストアを取得しました',
-        body: matches.length ? `ウィッシュリスト ${matches.length}件が登場中（全${storeCount}スキン）` : `本日のストア ${storeCount}スキンを確認しました`
+        body: who + (matches.length ? `ウィッシュリスト ${matches.length}件が登場中（全${storeCount}スキン）` : `本日のストア ${storeCount}スキンを確認しました`)
       })
     }
     return out
+  }
+
+  /** Runs the notify/save/dedupe pipeline for one store snapshot (one account). */
+  private async processSnapshot(
+    snap: StoreSnapshot,
+    settings: Settings,
+    webhook: Notifier | null,
+    accountLabel: string | null,
+    multi: boolean
+  ): Promise<{ matches: MatchResult[]; notified: number; failed: number; unresolved: number; stored: StoredSnapshot | null; desktop: DesktopNotice[] }> {
+    const { repos } = this.deps
+    const offers = resolveOffers(snap, repos.catalog)
+    const periodKey = computePeriodKey(snap)
+    const snapshotId = repos.stores.save(
+      {
+        accountId: snap.accountId,
+        accountName: snap.accountName ?? accountLabel,
+        periodKey,
+        periodStart: snap.periodStart ?? null,
+        periodEnd: snap.periodEnd ?? null,
+        fetchedAt: snap.fetchedAt,
+        source: snap.source
+      },
+      offers
+    )
+    const stored = repos.stores.list(400).find((s) => s.id === snapshotId) ?? null
+    const matches = matchWishlist(offers, repos.wishlist.list())
+    const periodDate = new Date(snap.periodStart ?? (snap.periodEnd ? new Date(new Date(snap.periodEnd).getTime() - 86_400_000) : snap.fetchedAt))
+    const label = multi ? accountLabel : null
+    let notified = 0
+    let failed = 0
+
+    if (webhook && settings.notifyWishlist) {
+      const pending = matches.filter((m) => !repos.notifications.wasSent(snap.accountId, periodKey, m.offer.skinId!, 'wishlist'))
+      for (const { payload, skinIds } of buildWishlistPayloads(pending, settings.timezone, periodDate, label)) {
+        const r = await this.trySend(webhook, payload)
+        for (const id of skinIds) repos.notifications.record(snap.accountId, periodKey, id, 'wishlist', r.ok, r.attempts, r.error)
+        if (r.ok) notified += skinIds.length
+        else failed += skinIds.length
+      }
+    }
+    if (webhook && settings.notifyDailyStore && !repos.notifications.wasSent(snap.accountId, periodKey, '', 'daily')) {
+      const r = await this.trySend(webhook, buildDailyPayload(offers, settings.timezone, periodDate, new Set(matches.map((m) => m.offer.skinId!)), label))
+      repos.notifications.record(snap.accountId, periodKey, '', 'daily', r.ok, r.attempts, r.error)
+      if (!r.ok) failed++
+    }
+    const desktop = this.buildDesktop(snap.accountId, periodKey, matches, offers.length, settings, label)
+    return { matches, notified, failed, unresolved: offers.filter((o) => !o.skinId).length, stored, desktop }
   }
 
   private async doRun(trigger: CheckTrigger, imported?: StoreSnapshot): Promise<CheckResult> {
@@ -131,75 +181,111 @@ export class StoreCheckService {
     const provider = this.deps.getProvider()
     const settings = repos.settings.get()
     const runId = repos.runs.start(trigger, imported ? imported.source : provider.id)
-    const startedAt = this.now()
-    repos.monitor.set({ lastAttemptAt: startedAt.toISOString() })
+    this.deps.repos.monitor.set({ lastAttemptAt: this.now().toISOString() })
+    const webhook = settings.notificationsEnabled ? await this.notifier() : null
+    const tz = settings.timezone
+
+    // Multi-account path: several Riot accounts, one after another. One account's failure
+    // never stops the others; the run succeeds if at least one account was fetched.
+    if (!imported && isMultiStoreProvider(provider) && provider.fetchStores) {
+      try {
+        const items = await provider.fetchStores(this.providerContext(), { force: trigger === 'manual' })
+        const fetched = items.filter((i) => i.snapshot)
+        const reloginAccounts = items.filter((i) => i.relogin || i.skipped === 'relogin').map((i) => i.label)
+        const errored = items.filter((i) => i.error && !i.relogin)
+        if (!fetched.length) {
+          // nothing fetched → treat as an error run so the scheduler retries / asks for re-login
+          const why = reloginAccounts.length ? `再ログインが必要: ${reloginAccounts.join('、')}` : errored.length ? (errored[0].error ?? 'ストア取得に失敗しました') : 'ログイン済みのアカウントがありません'
+          throw new Error(why)
+        }
+        let totalMatched = 0
+        let totalNotified = 0
+        let totalFailed = 0
+        let totalUnresolved = 0
+        const allMatches: MatchResult[] = []
+        const allDesktop: DesktopNotice[] = []
+        let firstStored: StoredSnapshot | null = null
+        let periodEnd: string | null = null
+        let periodKey: string | null = null
+        for (const item of fetched) {
+          const snap = item.snapshot!
+          if (!snap.offers.length) continue
+          const res = await this.processSnapshot(snap, settings, webhook, item.label, items.length > 1)
+          totalMatched += res.matches.length
+          totalNotified += res.notified
+          totalFailed += res.failed
+          totalUnresolved += res.unresolved
+          allMatches.push(...res.matches)
+          allDesktop.push(...res.desktop)
+          firstStored ??= res.stored
+          periodEnd ??= snap.periodEnd ?? null
+          periodKey ??= computePeriodKey(snap)
+        }
+        const parts = [`取得 ${fetched.length}アカウント`, `一致 ${totalMatched}件`, `新規通知 ${totalNotified}件`]
+        if (totalFailed) parts.push(`通知失敗 ${totalFailed}件`)
+        if (reloginAccounts.length) parts.push(`要再ログイン ${reloginAccounts.length}件`)
+        if (errored.length) parts.push(`取得失敗 ${errored.length}件`)
+        if (totalUnresolved) parts.push(`カタログ未登録 ${totalUnresolved}件`)
+        if (!webhook && settings.notificationsEnabled && totalMatched) parts.push('通知先が未設定のため通知なし')
+        const message = parts.join(' / ')
+        repos.runs.finish(runId, { status: 'success', periodKey, matched: totalMatched, notified: totalNotified, message })
+        const lastErr =
+          reloginAccounts.length ? `再ログインが必要なアカウントがあります: ${reloginAccounts.join('、')}` : totalFailed ? `Discord 通知に失敗しました (${totalFailed}件) — 次回チェック時に再送します` : errored.length ? `一部のアカウントで取得に失敗しました（${errored.length}件）` : null
+        // a temporary failure of one account → keep the retry schedule running for it
+        // (accounts already fetched for this period are skipped on the retry)
+        const prevFails = repos.monitor.get().consecutiveFailures
+        repos.monitor.set({
+          lastSuccessAt: this.now().toISOString(),
+          lastPeriodKey: periodKey,
+          lastPeriodEnd: periodEnd,
+          consecutiveFailures: errored.length ? prevFails + 1 : 0,
+          lastError: lastErr,
+          lastErrorAt: lastErr ? this.now().toISOString() : null
+        })
+        for (const e of errored) repos.errors.add(`check:${e.label}`, e.error ?? 'エラー')
+        return { status: 'success', message, snapshot: firstStored, matches: allMatches, notified: totalNotified, failedNotifications: totalFailed, desktop: allDesktop }
+      } catch (e) {
+        return this.failRun(runId, provider.id, e)
+      }
+    }
+
+    // Single-snapshot path (mock provider, manual import, legacy single-account).
     try {
       const snap = imported ?? (await provider.fetchStore(this.providerContext()))
       if (!snap.offers.length) throw new Error('ストア情報が空です')
-      const offers = resolveOffers(snap, repos.catalog)
       const periodKey = computePeriodKey(snap)
-      const snapshotId = repos.stores.save(
-        {
-          accountId: snap.accountId,
-          accountName: snap.accountName ?? null,
-          periodKey,
-          periodStart: snap.periodStart ?? null,
-          periodEnd: snap.periodEnd ?? null,
-          fetchedAt: snap.fetchedAt,
-          source: snap.source
-        },
-        offers
-      )
-      const stored = repos.stores.list(200).find((s) => s.id === snapshotId) ?? null
-      const matches = matchWishlist(offers, repos.wishlist.list())
+      const res = await this.processSnapshot(snap, settings, webhook, snap.accountName ?? null, false)
       const periodDate = new Date(snap.periodStart ?? (snap.periodEnd ? new Date(new Date(snap.periodEnd).getTime() - 86_400_000) : snap.fetchedAt))
-
-      let notified = 0
-      let failed = 0
-      const webhook = settings.notificationsEnabled ? await this.notifier() : null
-      const unresolved = offers.filter((o) => !o.skinId).length
-
-      if (webhook && settings.notifyWishlist) {
-        const pending = matches.filter((m) => !repos.notifications.wasSent(snap.accountId, periodKey, m.offer.skinId!, 'wishlist'))
-        for (const { payload, skinIds } of buildWishlistPayloads(pending, settings.timezone, periodDate)) {
-          const r = await this.trySend(webhook, payload)
-          for (const id of skinIds) repos.notifications.record(snap.accountId, periodKey, id, 'wishlist', r.ok, r.attempts, r.error)
-          if (r.ok) notified += skinIds.length
-          else failed += skinIds.length
-        }
-      }
-      if (webhook && settings.notifyDailyStore && !repos.notifications.wasSent(snap.accountId, periodKey, '', 'daily')) {
-        const r = await this.trySend(webhook, buildDailyPayload(offers, settings.timezone, periodDate, new Set(matches.map((m) => m.offer.skinId!))))
-        repos.notifications.record(snap.accountId, periodKey, '', 'daily', r.ok, r.attempts, r.error)
-        if (!r.ok) failed++
-      }
-
       const message =
-        `${formatZonedDate(periodDate, settings.timezone)} のストアを確認: 一致 ${matches.length}件 / 新規通知 ${notified}件` +
-        (failed ? ` / 通知失敗 ${failed}件` : '') +
-        (unresolved ? ` / カタログ未登録 ${unresolved}件` : '') +
-        (!webhook && settings.notificationsEnabled && matches.length ? ' / 通知先が未設定のため通知なし' : '')
-      repos.runs.finish(runId, { status: 'success', periodKey, matched: matches.length, notified, message })
+        `${formatZonedDate(periodDate, tz)} のストアを確認: 一致 ${res.matches.length}件 / 新規通知 ${res.notified}件` +
+        (res.failed ? ` / 通知失敗 ${res.failed}件` : '') +
+        (res.unresolved ? ` / カタログ未登録 ${res.unresolved}件` : '') +
+        (!webhook && settings.notificationsEnabled && res.matches.length ? ' / 通知先が未設定のため通知なし' : '')
+      repos.runs.finish(runId, { status: 'success', periodKey, matched: res.matches.length, notified: res.notified, message })
       repos.monitor.set({
         lastSuccessAt: this.now().toISOString(),
         lastPeriodKey: periodKey,
         lastPeriodEnd: snap.periodEnd ?? null,
         consecutiveFailures: 0,
-        lastError: failed ? `Discord 通知に失敗しました (${failed}件) — 次回チェック時に再送します` : null,
-        lastErrorAt: failed ? this.now().toISOString() : null
+        lastError: res.failed ? `Discord 通知に失敗しました (${res.failed}件) — 次回チェック時に再送します` : null,
+        lastErrorAt: res.failed ? this.now().toISOString() : null
       })
-      if (failed) repos.errors.add('discord', `通知失敗 ${failed}件`)
-      const desktop = this.buildDesktop(snap.accountId, periodKey, matches, offers.length, settings)
-      return { status: 'success', message, snapshot: stored, matches, notified, failedNotifications: failed, desktop }
+      if (res.failed) repos.errors.add('discord', `通知失敗 ${res.failed}件`)
+      return { status: 'success', message, snapshot: res.stored, matches: res.matches, notified: res.notified, failedNotifications: res.failed, desktop: res.desktop }
     } catch (e) {
-      const msg = errorMessage(e)
-      const state = repos.monitor.get()
-      repos.monitor.set({ lastError: msg, lastErrorAt: this.now().toISOString(), consecutiveFailures: state.consecutiveFailures + 1 })
-      repos.runs.finish(runId, { status: 'error', message: msg })
-      repos.errors.add(`check:${provider.id}`, msg)
-      await this.notifyError(msg).catch(() => undefined)
-      return { status: 'error', message: msg, snapshot: null, matches: [], notified: 0, failedNotifications: 0, desktop: [] }
+      return this.failRun(runId, provider.id, e)
     }
+  }
+
+  private async failRun(runId: number, providerId: string, e: unknown): Promise<CheckResult> {
+    const { repos } = this.deps
+    const msg = errorMessage(e)
+    const state = repos.monitor.get()
+    repos.monitor.set({ lastError: msg, lastErrorAt: this.now().toISOString(), consecutiveFailures: state.consecutiveFailures + 1 })
+    repos.runs.finish(runId, { status: 'error', message: msg })
+    repos.errors.add(`check:${providerId}`, msg)
+    await this.notifyError(msg).catch(() => undefined)
+    return { status: 'error', message: msg, snapshot: null, matches: [], notified: 0, failedNotifications: 0, desktop: [] }
   }
 
   /** The configured destination (BOT DM if set up, else the webhook). */

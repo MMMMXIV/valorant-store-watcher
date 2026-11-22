@@ -328,6 +328,15 @@ export class StoreRepo {
     }))
   }
 
+  /** Latest snapshot of one account (optionally from one source). */
+  latestFor(accountId: string, source?: string): StoredSnapshot | null {
+    const r = this.db.get<{ id: number }>(
+      `SELECT id FROM store_snapshots WHERE account_id = ? ${source ? 'AND source = ?' : ''} ORDER BY fetched_at DESC LIMIT 1`,
+      source ? [accountId, source] : [accountId]
+    )
+    return r ? (this.list(500).find((s) => s.id === r.id) ?? null) : null
+  }
+
   latest(source?: string): StoredSnapshot | null {
     if (!source) return this.list(1)[0] ?? null
     const r = this.db.get<{ id: number }>('SELECT id FROM store_snapshots WHERE source = ? ORDER BY fetched_at DESC LIMIT 1', [source])

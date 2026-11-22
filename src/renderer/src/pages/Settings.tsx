@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { IconPlus } from '../components/Icons'
 import { Badge, Button, Card, Notice, Toggle, inputCls, useToast } from '../components/ui'
 import { api, errText, type Diagnostics, type Settings } from '../lib/api'
 import { fmtDateTime } from '../lib/format'
@@ -45,15 +46,6 @@ export function SettingsPage() {
 
 type SaveFn = (patch: Partial<Settings>, msg?: string) => Promise<void>
 
-const REGIONS: Array<[Settings['riotRegion'], string]> = [
-  ['auto', '自動判定（推奨）'],
-  ['ap', 'アジア太平洋 (AP) ※日本'],
-  ['kr', '韓国 (KR)'],
-  ['na', '北米 (NA)'],
-  ['eu', 'ヨーロッパ (EU)'],
-  ['latam', '中南米 (LATAM)'],
-  ['br', 'ブラジル (BR)']
-]
 
 function RiotCard({ s, save }: { s: Settings; save: SaveFn }) {
   const { state } = useData()
@@ -73,8 +65,8 @@ function RiotCard({ s, save }: { s: Settings; save: SaveFn }) {
       setBusy(null)
     }
   }
-  const afterLogin = (r: { account: { gameName: string | null } | null; check: { status: string; message: string } }) => {
-    toast('ok', `${r.account?.gameName ?? 'Riotアカウント'} でログインしました`)
+  const afterLogin = (r: { account: { label?: string; gameName?: string | null } | null; check: { status: string; message: string } }) => {
+    toast('ok', `${r.account?.label ?? r.account?.gameName ?? 'Riotアカウント'} でログインしました`)
     toast(r.check.status === 'success' ? 'ok' : 'err', r.check.message)
   }
 
@@ -104,77 +96,55 @@ function RiotCard({ s, save }: { s: Settings; save: SaveFn }) {
   return (
     <Card
       title="Riotアカウント連携（非公式）"
-      action={riot?.loggedIn ? (riot.needsRelogin ? <Badge tone="red">要再ログイン</Badge> : <Badge tone="teal">ログイン済み</Badge>) : <Badge tone="mute">未ログイン</Badge>}
+      action={<Badge tone={riot?.loggedIn ? (riot.needsRelogin ? 'red' : 'teal') : 'mute'}>{riot?.loggedIn ? (riot.needsRelogin ? '要再ログイン' : `${riot.accounts.length}アカウント`) : '未ログイン'}</Badge>}
     >
-      {riot?.loggedIn && riot.account && (
-        <div className="mb-3 grid grid-cols-2 gap-3 text-xs">
-          <div className="border border-ink-700 px-3 py-2">
-            <div className="text-mute">Riot ID</div>
-            <div className="mt-0.5 text-sm font-bold">{riot.account.gameName ?? '（取得中）'}</div>
-          </div>
-          <div className="border border-ink-700 px-3 py-2">
-            <div className="text-mute">地域</div>
-            <div className="mt-0.5 text-sm font-bold">{riot.account.region?.toUpperCase() ?? '未判定'}</div>
-          </div>
-        </div>
-      )}
-      {riot?.needsRelogin && (
-        <div className="mb-3">
-          <Notice tone="red">ログインの有効期限が切れました。もう一度ログインしてください（Riotの仕様で定期的に必要になります）。</Notice>
-        </div>
-      )}
-      <div className="flex flex-wrap gap-2">
+      <p className="mb-3 text-xs leading-relaxed text-mute">
+        メイン・サブなど<strong>自分のアカウントを複数</strong>登録できます（最大{riot?.maxAccounts ?? 5}）。毎朝それぞれのストアを順番にチェックし、ウィッシュリストのスキンが出たアカウントを通知します。ウィッシュリストは全アカウント共通です。
+      </p>
+
+      <div className="space-y-2">
+        {(riot?.accounts ?? []).map((a) => (
+          <AccountRow key={a.key} account={a} busyKey={busy} run={run} toast={toast} afterLogin={afterLogin} />
+        ))}
+        {!riot?.accounts.length && <div className="border border-dashed border-ink-600 py-4 text-center text-sm text-mute">まだアカウントが登録されていません</div>}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
         <Button
-          busy={busy === 'login'}
-          onClick={() =>
-            void run('login', async () => {
-              afterLogin(await api().riot.login())
-            })
-          }
+          busy={busy === 'add'}
+          disabled={(riot?.accounts.length ?? 0) >= (riot?.maxAccounts ?? 5)}
+          onClick={() => void run('add', async () => afterLogin(await api().riot.login()))}
         >
-          {riot?.loggedIn ? 'Riotに再ログイン' : 'Riot公式ページでログイン'}
+          <IconPlus width={16} height={16} /> アカウントを追加（Riot公式ページ）
         </Button>
-        {riot?.loggedIn && (
+        {!!riot?.accounts.length && (
           <Button
             variant="danger"
             busy={busy === 'logout'}
-            onClick={() =>
-              void run('logout', async () => {
-                await api().riot.logout()
-                toast('info', '連携を解除し、ログイン情報を削除しました')
-              })
-            }
+            onClick={() => void run('logout', async () => { await api().riot.logout(); toast('info', 'すべての連携を解除し、ログイン情報を削除しました') })}
           >
-            連携解除
+            すべて解除
           </Button>
         )}
       </div>
+
       <p className="mt-2 text-xs leading-relaxed text-mute">
-        別ウィンドウでRiot公式のログインページ（auth.riotgames.com）が開きます。ウィンドウのタイトルでアドレスを確認できます。2段階認証のコードもそのページに入力してください。
+        別ウィンドウでRiot公式のログインページ（auth.riotgames.com）が開きます。ウィンドウのタイトルでアドレスと、どのアカウント用かを確認できます。2段階認証のコードもそのページに入力してください。追加するたびに、そのアカウントでログインしてください。
       </p>
       <Notice tone="teal" title="再ログインを減らすコツ">
         Riotのログイン画面で<strong>「ログイン状態を保持する（Stay signed in）」にチェック</strong>を入れてください。
         アプリはログイン状態を自動で更新し続け、期限が切れても保存済みのRiotセッションで<strong>自動的に再ログイン</strong>を試みます。
-        それでもRiotがパスワードを求めたときだけ、通知でお知らせします（通知をクリックするとログイン画面が開きます）。
+        それでもRiotがパスワードを求めたときだけ、そのアカウントだけ通知でお知らせします。
         通知方法や設定の変更、アプリの再起動・アップデートで再ログインが必要になることはありません。
       </Notice>
-      <label className="mt-3 block text-xs text-mute">
-        地域
-        <select className={`${inputCls} mt-1`} value={s.riotRegion} onChange={(e) => void save({ riotRegion: e.target.value as Settings['riotRegion'] })}>
-          {REGIONS.map(([v, l]) => (
-            <option key={v} value={v}>
-              {l}
-            </option>
-          ))}
-        </select>
-      </label>
+
       <button className="mt-3 text-xs text-mute underline hover:text-bone" onClick={() => setShowSsid(!showSsid)}>
-        ログインウィンドウがうまく動かない場合（ssid を貼り付け）
+        ログインウィンドウがうまく動かない場合（ssid を貼り付けて新規追加）
       </button>
       {showSsid && (
         <div className="mt-2 space-y-2 border border-ink-700 p-3 text-xs text-mute">
           <ol className="list-decimal space-y-1 pl-4">
-            <li>普段のブラウザで Riot のログインページを開いてログインします（下のボタン）。</li>
+            <li>普段のブラウザで、追加したいアカウントで Riot のログインページを開いてログインします（下のボタン）。</li>
             <li>playvalorant.com に移動したら F12 → Application → Cookies → https://auth.riotgames.com を開きます。</li>
             <li><code>ssid</code> の値をコピーして下に貼り付けます。</li>
           </ol>
@@ -184,26 +154,91 @@ function RiotCard({ s, save }: { s: Settings; save: SaveFn }) {
           <input type="password" autoComplete="off" spellCheck={false} className={inputCls} placeholder="ssid の値" value={ssid} onChange={(e) => setSsid(e.target.value)} />
           <Button
             variant="outline"
-            disabled={ssid.trim().length < 20}
+            disabled={ssid.trim().length < 20 || (riot?.accounts.length ?? 0) >= (riot?.maxAccounts ?? 5)}
             busy={busy === 'ssid'}
-            onClick={() =>
-              void run('ssid', async () => {
-                const r = await api().riot.loginWithSsid(ssid)
-                setSsid('')
-                afterLogin(r)
-              })
-            }
+            onClick={() => void run('ssid', async () => { const r = await api().riot.loginWithSsid(ssid); setSsid(''); afterLogin(r) })}
           >
-            ssid でログイン
+            ssid で新規アカウントを追加
           </Button>
         </div>
       )}
       <div className="mt-4 border-t border-ink-700 pt-3">
         <button className="text-xs text-mute underline hover:text-bone" onClick={() => void save({ riskAcknowledged: false }, '非公式方式を無効にしました')}>
-          非公式方式を無効にする（同意を取り消し、Riotのログイン情報も削除します）
+          非公式方式を無効にする（同意を取り消し、すべてのRiotログイン情報も削除します）
         </button>
       </div>
     </Card>
+  )
+}
+
+const REGION_OPTS: Array<[string, string]> = [
+  ['auto', '自動判定'],
+  ['ap', 'AP（日本）'],
+  ['kr', 'KR'],
+  ['na', 'NA'],
+  ['eu', 'EU'],
+  ['latam', 'LATAM'],
+  ['br', 'BR']
+]
+
+function AccountRow({ account, busyKey, run, toast, afterLogin }: {
+  account: import('../lib/api').RiotAccount
+  busyKey: string | null
+  run: (k: string, fn: () => Promise<void>) => Promise<void>
+  toast: ReturnType<typeof useToast>
+  afterLogin: (r: { account: { label?: string; gameName?: string | null } | null; check: { status: string; message: string } }) => void
+}) {
+  const a = account
+  const [editing, setEditing] = useState(false)
+  const [label, setLabel] = useState(a.label)
+  const bk = (suffix: string) => `acct:${a.key}:${suffix}`
+  return (
+    <div className={`border px-3 py-2.5 ${a.needsRelogin ? 'border-crimson/60 bg-crimson/5' : 'border-ink-700'}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        {editing ? (
+          <input
+            autoFocus
+            className={`${inputCls} h-8 w-28`}
+            value={label}
+            maxLength={20}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => { setEditing(false); if (label.trim() && label !== a.label) void api().riot.rename(a.key, label.trim()) }}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          />
+        ) : (
+          <button className="text-sm font-bold hover:text-crimson" title="名前を変更" onClick={() => { setLabel(a.label); setEditing(true) }}>
+            {a.label}
+          </button>
+        )}
+        <span className="text-sm">{a.gameName ?? '（初回取得前）'}</span>
+        {a.loggedIn ? (a.needsRelogin ? <Badge tone="red">要再ログイン</Badge> : <Badge tone="teal">ログイン済み</Badge>) : <Badge tone="amber">未ログイン</Badge>}
+        <select
+          className={`${inputCls} ml-auto h-8 w-28`}
+          value={a.regionOverride}
+          onChange={(e) => void api().riot.setRegion(a.key, e.target.value)}
+          title="地域"
+        >
+          {REGION_OPTS.map(([v, l]) => (
+            <option key={v} value={v}>
+              地域: {l}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {a.needsRelogin && (
+          <Button variant="outline" busy={busyKey === bk('relogin')} onClick={() => void run(bk('relogin'), async () => afterLogin(await api().riot.login(a.key)))}>
+            再ログイン
+          </Button>
+        )}
+        <button
+          className="text-xs text-mute underline hover:text-crimson"
+          onClick={() => void run(bk('remove'), async () => { await api().riot.removeAccount(a.key); toast('info', `${a.label} の連携を解除しました`) })}
+        >
+          このアカウントを削除
+        </button>
+      </div>
+    </div>
   )
 }
 

@@ -1,17 +1,19 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from 'electron'
-import { WatcherCore, repairSettings, DiscordBotClient, botInstallLinks, isValidBotToken, isValidUserId, webhookNotifier, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan } from '../core'
+import { WatcherCore, repairSettings, DiscordBotClient, botInstallLinks, isValidBotToken, isValidUserId, webhookNotifier, RiotAccountsProvider, RiotAuthRequiredError, accountDisplay, newAccountKey, MAX_RIOT_ACCOUNTS, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan, type RiotAccountRecord } from '../core'
 import { matchWishlist } from '../core/monitor/matcher'
 import { IpcSchemas, type IpcChannel } from './ipcSchemas'
 import { Logger } from './logger'
 import { SecretStore } from './secrets'
-import { electronAuthorize, openRiotLoginWindow, silentRiotLogin, wipeRiotSessions } from './riotAuth'
+import { electronAuthorize, openRiotLoginWindow, silentRiotLogin, wipeRiotApiSession, wipeRiotSession } from './riotAuth'
 import { renderTierImage, type TierSpec } from './tierImage'
 import { AppUpdater } from './updater'
 
 const WEBHOOK_KEY = 'discord.webhook'
-const RIOT_COOKIES_KEY = 'riot.cookies'
+const LEGACY_RIOT_COOKIES_KEY = 'riot.cookies' // v1.x single account
+const riotCookiesKey = (key: string): string => `riot.cookies:${key}`
+const RIOT_ACCOUNTS_META = 'riot_accounts'
 const BOT_TOKEN_KEY = 'discord.botToken'
 const isDev = !app.isPackaged && process.env.ELECTRON_RENDERER_URL !== undefined
 const startHiddenArg = process.argv.includes('--hidden')
@@ -26,7 +28,7 @@ let paused = false
 let lastPlan: CheckPlan | null = null
 let catalogTimer: NodeJS.Timeout | null = null
 let trayHintShown = false
-let riot: RiotStoreProvider
+let riot: RiotAccountsProvider
 let reloginNotified = false
 let updater: AppUpdater
 let keepAliveTimer: NodeJS.Timeout | null = null
@@ -68,10 +70,12 @@ async function bootstrap(): Promise<void> {
     getWebhookUrl: async () => secrets.get(WEBHOOK_KEY),
     getNotifier: async () => currentNotifier(),
     onChange: () => {
-      if (riot?.needsRelogin && !reloginNotified && Notification.isSupported()) {
+      const needing = riot ? riot.accounts().filter((a) => riot.isLoggedIn(a.key) && riot.needsRelogin(a.key)) : []
+      if (needing.length && !reloginNotified && Notification.isSupported()) {
         reloginNotified = true
-        const n = new Notification({ title: 'VALORANT Store Watcher', body: 'Riotへの再ログインが必要です。ここをクリックするとログイン画面を開きます。' })
-        n.on('click', () => void startRiotLogin().catch((e) => logger.warn('再ログイン失敗', e)))
+        const names = needing.map((a) => accountDisplay(a)).join('、')
+        const n = new Notification({ title: 'VALORANT Store Watcher', body: `Riotへの再ログインが必要です（${names}）。ここをクリックするとログイン画面を開きます。` })
+        n.on('click', () => void startRiotLogin({ key: needing[0].key }).catch((e) => logger.warn('再ログイン失敗', e)))
         n.show()
       }
       broadcast()
@@ -91,22 +95,25 @@ async function bootstrap(): Promise<void> {
     }
   })
 
-  riot = new RiotStoreProvider({
+  migrateSingleRiotAccount()
+  riot = new RiotAccountsProvider({
     fetchImpl: (url, init) => net.fetch(url, init),
     authorize: electronAuthorize,
+    loadAccounts: loadRiotAccounts,
+    saveAccounts: (list) => core.repos.meta.set(RIOT_ACCOUNTS_META, JSON.stringify(list)),
     loadCookies: loadRiotCookies,
-    saveCookies: (jar) => secrets.set(RIOT_COOKIES_KEY, JSON.stringify(jar)),
-    loadAccount: () => core.loadRiotAccount(),
-    saveAccount: (a) => core.saveRiotAccount(a),
-    getRegionSetting: () => core.repos.settings.get().riotRegion,
+    saveCookies: (key, jar) => secrets.set(riotCookiesKey(key), JSON.stringify(jar)),
+    deleteCookies: (key) => secrets.delete(riotCookiesKey(key)),
     getClientVersion: () => core.riotClientVersion(),
     riskAcknowledged: () => core.repos.settings.get().riskAcknowledged,
-    silentRelogin: async () => {
-      logger.info('保存済みのRiotセッションでの自動再ログインを試みます')
-      const r = await silentRiotLogin(loadRiotCookies())
-      logger.info(r ? '自動再ログインに成功しました' : '自動再ログインできませんでした（手動ログインが必要）')
+    silentRelogin: async (key) => {
+      const label = accountDisplay(loadRiotAccounts().find((a) => a.key === key) ?? { gameName: null, label: key })
+      logger.info(`保存済みのRiotセッションでの自動再ログインを試みます: ${label}`)
+      const r = await silentRiotLogin(key, loadRiotCookies(key))
+      logger.info(r ? `自動再ログインに成功しました: ${label}` : `自動再ログインできませんでした（手動ログインが必要）: ${label}`)
       return r
-    }
+    },
+    sleepBetweenMs: 2500
   })
   core.registerProvider(riot)
 
@@ -141,7 +148,7 @@ async function bootstrap(): Promise<void> {
   const keepAlive = () =>
     void riot
       .keepAlive()
-      .then((did) => did && logger.info('Riotセッションを更新しました'))
+      .then((names) => names.length && logger.info(`Riotセッションを更新しました: ${names.join('、')}`))
       .catch((e) => logger.warn('Riotセッションの更新に失敗', e))
       .finally(() => broadcast())
   keepAliveTimer = setInterval(keepAlive, 3600_000)
@@ -247,7 +254,7 @@ function monitorLabel(): string {
   if (paused) return '⏸ 監視一時停止中'
   const s = core.repos.settings.get()
   if (!s.autoCheckEnabled) return '⏹ 自動チェック無効'
-  if (core.provider.id === 'riot' && riot?.needsRelogin) return '⚠ Riotへの再ログインが必要'
+  if (core.provider.id === 'riot' && riot?.anyNeedsRelogin) return '⚠ Riotへの再ログインが必要'
   if (core.provider.canRunAutomatically && !core.provider.canRunAutomatically()) return '⚠ 取得の準備ができていません'
   if (core.checkService.isRunning) return '🔄 チェック中…'
   if (lastPlan) return `🟢 監視中（次回 ${formatZonedDateTime(lastPlan.dueAt, s.timezone)}）`
@@ -271,8 +278,11 @@ function updateTray(): void {
       { type: 'separator' },
       { label: 'アプリを開く', click: () => showWindow() },
       { label: '今すぐチェック', click: () => void core.checkService.runCheck('manual') },
-      ...(riot?.needsRelogin || (core.repos.settings.get().providerId === 'riot' && riot && !riot.loggedIn && core.repos.settings.get().riskAcknowledged)
-        ? [{ label: '⚠ Riotにログイン', click: () => void startRiotLogin().catch((e) => logger.warn('ログイン失敗', e)) }]
+      ...(riot
+        ? riot
+            .accounts()
+            .filter((a) => riot.isLoggedIn(a.key) && riot.needsRelogin(a.key))
+            .map((a) => ({ label: `⚠ 再ログイン: ${accountDisplay(a)}`, click: () => void startRiotLogin({ key: a.key }).catch((e) => logger.warn('ログイン失敗', e)) }))
         : []),
       { label: paused ? '監視を再開' : '監視を一時停止', click: () => setPaused(!paused) },
       { type: 'separator' },
@@ -317,11 +327,21 @@ function broadcast(): void {
 async function buildState() {
   const settings = core.repos.settings.get()
   const provider = core.provider
-  const latest = core.repos.stores.latest(provider.id)
+  const accounts = riot.accounts()
+  // per-account "today's store" for the dashboard (Riot); the mock store has a single pseudo account
+  const accountStores =
+    provider.id === 'riot'
+      ? accounts.map((a) => {
+          const st = a.puuid ? core.repos.stores.latestFor(a.puuid, 'riot') : null
+          return { key: a.key, label: accountDisplay(a), store: st, matchedSkinIds: st ? matchWishlist(st.offers, core.repos.wishlist.list()).map((m) => m.offer.skinId) : [], isCurrent: !!st?.periodEnd && new Date(st.periodEnd).getTime() > Date.now() }
+        })
+      : []
+  const latest = accountStores.find((x) => x.store)?.store ?? core.repos.stores.latest(provider.id)
   const lastRun = core.repos.runs.lastFor(provider.id)
   const status = await provider.status(core.checkService.providerContext())
   const wishlist = core.repos.wishlist.list()
   const matches = latest ? matchWishlist(latest.offers, wishlist) : []
+  const allMatched = provider.id === 'riot' ? [...new Set(accountStores.filter((x) => x.isCurrent).flatMap((x) => x.matchedSkinIds))] : matches.map((m) => m.offer.skinId)
   const plan = core.scheduler.plan()
   return {
     version: app.getVersion(),
@@ -344,7 +364,8 @@ async function buildState() {
     update: updater?.state ?? null,
     latestStore: latest,
     latestIsCurrent: !!latest?.periodEnd && new Date(latest.periodEnd).getTime() > Date.now(),
-    matchedSkinIds: matches.map((m) => m.offer.skinId),
+    matchedSkinIds: allMatched,
+    accountStores,
     wishlistCount: wishlist.length,
     catalog: core.catalogService.status(),
     webhookConfigured: secrets.has(WEBHOOK_KEY),
@@ -353,7 +374,21 @@ async function buildState() {
       return { configured: secrets.has(BOT_TOKEN_KEY), userId: settings.discordUserId, app, links: app ? botInstallLinks(app.id) : null }
     })(),
     notifierConfigured: currentNotifier() !== null,
-    riot: { loggedIn: riot.loggedIn, needsRelogin: riot.needsRelogin, account: core.loadRiotAccount() },
+    riot: {
+      loggedIn: riot.loggedIn,
+      needsRelogin: riot.anyNeedsRelogin,
+      account: accounts[0] ? { puuid: accounts[0].puuid ?? '', gameName: accounts[0].gameName, region: accounts[0].region } : null,
+      maxAccounts: MAX_RIOT_ACCOUNTS,
+      accounts: accounts.map((a) => ({
+        key: a.key,
+        label: a.label,
+        gameName: a.gameName,
+        region: a.region,
+        regionOverride: a.regionOverride,
+        loggedIn: riot.isLoggedIn(a.key),
+        needsRelogin: riot.isLoggedIn(a.key) && riot.needsRelogin(a.key)
+      }))
+    },
     secureStorageAvailable: secrets.available(),
     lastRun
   }
@@ -416,7 +451,16 @@ function registerIpc(): void {
   }))
   handle('settings:update', async (patch) => {
     // revoking the risk acknowledgement also removes the Riot login (no unofficial access without consent)
-    if (patch.riskAcknowledged === false && riot.loggedIn) await riotLogout()
+    if (patch.riskAcknowledged === false && riot.loggedIn) {
+      for (const a of riot.accounts()) {
+        riot.remove(a.key)
+        await wipeRiotSession(a.key)
+      }
+      await wipeRiotApiSession()
+      secrets.delete(LEGACY_RIOT_COOKIES_KEY)
+      core.saveRiotAccount(null)
+      logger.info('同意取り消しにより、すべてのRiotアカウントの認証情報を破棄しました')
+    }
     const s = core.repos.settings.update(patch)
     if (patch.launchAtLogin !== undefined) applyLoginItem(s.launchAtLogin)
     void core.scheduler.tick()
@@ -469,31 +513,49 @@ function registerIpc(): void {
     if (!c || !uid) return { ok: false, message: 'BOTトークンとユーザーIDを設定してください' }
     return core.checkService.sendTest({ kind: 'bot', send: (p) => c.sendDm(uid, p) })
   })
-  afterLoginFn = async (who: string) => {
-    reloginNotified = false
-    core.repos.monitor.set({ consecutiveFailures: 0, lastError: null, lastErrorAt: null, lastPeriodEnd: null, lastSuccessAt: null })
-    core.repos.settings.update({ providerId: 'riot' })
-    logger.info(`Riotログイン成功: ${who}`)
-    broadcast()
-    // fetch today's store right away
-    const r = await core.checkService.runCheck('manual')
-    return { account: core.loadRiotAccount(), check: summarize(r) }
-  }
-  handle('riot:login', () => startRiotLogin())
-  handle('riot:loginWithSsid', async ({ ssid }) => {
+  handle('riot:login', ({ key, label }) => startRiotLogin({ key, label }))
+  handle('riot:loginWithSsid', async ({ key, label, ssid }) => {
     if (!core.repos.settings.get().riskAcknowledged) throw new Error('先にリスクの確認をしてください')
     const v = parseSsidInput(ssid)
     if (!v) throw new Error('ssid の形式が正しくありません')
     try {
-      const a = await riot.loginWithSsid(v)
-      return afterLoginFn(a.gameName ?? 'アカウント')
+      const rec = key ? await riot.reloginFromSsid(key, v) : await riot.addFromSsid(newAccountKey(), label ?? defaultLabel(), v)
+      return afterRiotLogin(rec)
     } catch (e) {
       if (e instanceof RiotAuthRequiredError) throw new Error('この ssid ではログインできませんでした（期限切れか、値が違います）')
       throw e
     }
   })
+  handle('riot:rename', ({ key, label }) => {
+    riot.rename(key, label)
+    broadcast()
+    return true
+  })
+  handle('riot:setRegion', ({ key, region }) => {
+    riot.setRegion(key, region)
+    void core.scheduler.tick()
+    broadcast()
+    return true
+  })
+  handle('riot:removeAccount', async ({ key }) => {
+    const label = accountDisplay(riot.accounts().find((a) => a.key === key) ?? { gameName: null, label: key })
+    riot.remove(key)
+    await wipeRiotSession(key)
+    logger.info(`Riotアカウントの連携を解除しました: ${label}`)
+    if (!riot.accounts().length && core.repos.settings.get().providerId === 'riot') core.repos.settings.update({ providerId: 'mock' })
+    broadcast()
+    return true
+  })
   handle('riot:logout', async () => {
-    await riotLogout()
+    // remove every account and its credentials
+    for (const a of riot.accounts()) {
+      riot.remove(a.key)
+      await wipeRiotSession(a.key)
+    }
+    await wipeRiotApiSession()
+    secrets.delete(LEGACY_RIOT_COOKIES_KEY)
+    core.saveRiotAccount(null)
+    logger.info('すべてのRiotアカウントの連携を解除し、認証情報を破棄しました')
     broadcast()
     return true
   })
@@ -580,8 +642,8 @@ function botAppInfo(): { id: string; name: string } | null {
   }
 }
 
-function loadRiotCookies(): Record<string, string> | null {
-  const raw = secrets.get(RIOT_COOKIES_KEY)
+function loadRiotCookies(key: string): Record<string, string> | null {
+  const raw = secrets.get(riotCookiesKey(key))
   try {
     return raw ? (JSON.parse(raw) as Record<string, string>) : null
   } catch {
@@ -589,26 +651,66 @@ function loadRiotCookies(): Record<string, string> | null {
   }
 }
 
-/** Removes every stored Riot credential (encrypted cookies, account info, login browser session). */
-async function riotLogout(): Promise<void> {
-  secrets.delete(RIOT_COOKIES_KEY)
-  core.saveRiotAccount(null)
-  riot.reset()
-  await wipeRiotSessions()
-  logger.info('Riot連携を解除し、認証情報を破棄しました')
+function loadRiotAccounts(): RiotAccountRecord[] {
+  const raw = core.repos.meta.get(RIOT_ACCOUNTS_META)
+  try {
+    const list = raw ? (JSON.parse(raw) as RiotAccountRecord[]) : []
+    return Array.isArray(list) ? list : []
+  } catch {
+    return []
+  }
 }
 
-let afterLoginFn: (who: string) => Promise<unknown> = async () => undefined
+/** Moves a v1.x single Riot account (riot.cookies + riot_account meta) into the multi-account list. */
+function migrateSingleRiotAccount(): void {
+  if (core.repos.meta.get(RIOT_ACCOUNTS_META)) return
+  const legacy = secrets.get(LEGACY_RIOT_COOKIES_KEY)
+  if (!legacy) return
+  const acct = core.loadRiotAccount()
+  const rec: RiotAccountRecord = {
+    key: 'main',
+    label: 'メイン',
+    puuid: acct?.puuid ?? null,
+    gameName: acct?.gameName ?? null,
+    region: acct?.region ?? null,
+    regionOverride: core.repos.settings.get().riotRegion,
+    lastPeriodEnd: core.repos.monitor.get().lastPeriodEnd,
+    createdAt: new Date().toISOString()
+  }
+  secrets.set(riotCookiesKey('main'), legacy)
+  core.repos.meta.set(RIOT_ACCOUNTS_META, JSON.stringify([rec]))
+  secrets.delete(LEGACY_RIOT_COOKIES_KEY)
+  logger.info(`既存のRiotアカウントを引き継ぎました: ${accountDisplay(rec)}`)
+}
 
-/** Opens the Riot login window (one at a time). If Riot remembers the session it completes instantly. */
-function startRiotLogin(): Promise<unknown> {
+function defaultLabel(): string {
+  const n = riot.accounts().length
+  return n === 0 ? 'メイン' : n === 1 ? 'サブ' : `アカウント${n + 1}`
+}
+
+async function afterRiotLogin(rec: RiotAccountRecord): Promise<unknown> {
+  reloginNotified = false
+  core.repos.monitor.set({ consecutiveFailures: 0, lastError: null, lastErrorAt: null })
+  core.repos.settings.update({ providerId: 'riot' })
+  logger.info(`Riotログイン成功: ${accountDisplay(rec)}`)
+  broadcast()
+  const r = await core.checkService.runCheck('manual')
+  return { account: { key: rec.key, label: rec.label, gameName: rec.gameName, region: rec.region }, check: summarize(r) }
+}
+
+/** Opens the Riot login window (one at a time). `key` re-logs an existing account; otherwise a new one. */
+function startRiotLogin(opts: { key?: string; label?: string } = {}): Promise<unknown> {
   if (!core.repos.settings.get().riskAcknowledged) return Promise.reject(new Error('先にリスクの確認をしてください'))
   if (loginInProgress) return loginInProgress
+  if (!opts.key && riot.accounts().length >= MAX_RIOT_ACCOUNTS) return Promise.reject(new Error(`登録できるアカウントは${MAX_RIOT_ACCOUNTS}つまでです`))
   showWindow()
   loginInProgress = (async () => {
-    const { redirectUrl, cookies } = await openRiotLoginWindow(mainWindow, loadRiotCookies())
-    const a = await riot.completeLogin(redirectUrl, cookies)
-    return afterLoginFn(a.gameName ?? 'アカウント')
+    const existing = opts.key ? riot.accounts().find((a) => a.key === opts.key) : null
+    const key = opts.key ?? newAccountKey()
+    const title = existing ? `再ログイン: ${accountDisplay(existing)}` : `${opts.label ?? defaultLabel()} のRiotログイン`
+    const { redirectUrl, cookies } = await openRiotLoginWindow(mainWindow, key, loadRiotCookies(key), title)
+    const rec = existing ? await riot.reloginFromLogin(key, redirectUrl, cookies) : await riot.addFromLogin(key, opts.label ?? defaultLabel(), redirectUrl, cookies)
+    return afterRiotLogin(rec)
   })().finally(() => (loginInProgress = null))
   return loginInProgress
 }

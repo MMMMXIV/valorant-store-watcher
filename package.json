@@ -1,6 +1,6 @@
 {
   "name": "valorant-store-watcher",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "VALORANTのデイリーストアを監視し、ウィッシュリストのスキンが出たらDiscordに通知する非公式デスクトップアプリ",
   "main": "out/main/index.js",
   "scripts": {

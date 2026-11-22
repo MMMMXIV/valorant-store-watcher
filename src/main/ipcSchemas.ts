@@ -38,8 +38,11 @@ export const IpcSchemas = {
       })).max(10)
     })
   }),
-  'riot:login': z.undefined(),
-  'riot:loginWithSsid': z.object({ ssid: z.string().min(10).max(4096) }),
+  'riot:login': z.object({ key: z.string().max(40).optional(), label: z.string().max(20).optional() }),
+  'riot:loginWithSsid': z.object({ key: z.string().max(40).optional(), label: z.string().max(20).optional(), ssid: z.string().min(10).max(4096) }),
+  'riot:rename': z.object({ key: z.string().max(40), label: z.string().min(1).max(20) }),
+  'riot:setRegion': z.object({ key: z.string().max(40), region: z.enum(['auto', 'ap', 'kr', 'na', 'eu', 'latam', 'br']) }),
+  'riot:removeAccount': z.object({ key: z.string().max(40) }),
   'riot:logout': z.undefined(),
   'bot:set': z.object({ token: z.string().trim().max(200).optional(), userId: z.string().trim().max(30) }),
   'bot:clear': z.undefined(),

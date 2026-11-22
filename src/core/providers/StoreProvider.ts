@@ -7,6 +7,28 @@ export interface ProviderStatus {
   accountLabel?: string | null
 }
 
+/** One account's result within a multi-account fetch. */
+export interface MultiFetchItem {
+  key: string
+  label: string
+  snapshot?: StoreSnapshot
+  /** Fetch failed for this account (other accounts are unaffected). */
+  error?: string
+  /** The failure means this account needs a manual re-login. */
+  relogin?: boolean
+  /** Account was intentionally skipped. */
+  skipped?: 'not-logged-in' | 'relogin' | 'fresh'
+}
+
+/** A provider that can fetch several accounts' stores in one check. */
+export interface MultiStoreProvider extends StoreProvider {
+  fetchStores(ctx: ProviderContext, opts: { force: boolean }): Promise<MultiFetchItem[]>
+}
+
+export function isMultiStoreProvider(p: StoreProvider): p is MultiStoreProvider {
+  return typeof (p as MultiStoreProvider).fetchStores === 'function'
+}
+
 export interface ProviderContext {
   now: Date
   /** Read-only access to catalog/wishlist (used by the mock provider). */

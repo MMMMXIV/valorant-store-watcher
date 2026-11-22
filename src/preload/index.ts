@@ -46,8 +46,11 @@ const api = {
     install: () => invoke('update:install')
   },
   riot: {
-    login: () => invoke('riot:login'),
-    loginWithSsid: (ssid: string) => invoke('riot:loginWithSsid', { ssid }),
+    login: (key?: string, label?: string) => invoke('riot:login', { key, label }),
+    loginWithSsid: (ssid: string, key?: string, label?: string) => invoke('riot:loginWithSsid', { key, label, ssid }),
+    rename: (key: string, label: string) => invoke('riot:rename', { key, label }),
+    setRegion: (key: string, region: string) => invoke('riot:setRegion', { key, region }),
+    removeAccount: (key: string) => invoke('riot:removeAccount', { key }),
     logout: () => invoke('riot:logout')
   },
   onStateChanged: (cb: () => void) => {
