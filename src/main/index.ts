@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from 'electron'
-import { WatcherCore, DiscordBotClient, botInstallLinks, isValidBotToken, isValidUserId, webhookNotifier, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan } from '../core'
+import { WatcherCore, repairSettings, DiscordBotClient, botInstallLinks, isValidBotToken, isValidUserId, webhookNotifier, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan } from '../core'
 import { matchWishlist } from '../core/monitor/matcher'
 import { IpcSchemas, type IpcChannel } from './ipcSchemas'
 import { Logger } from './logger'
@@ -98,6 +98,18 @@ async function bootstrap(): Promise<void> {
     }
   })
   core.registerProvider(riot)
+
+  // undo settings resets caused by versions ≤ 1.3.1 (see repairSettings)
+  const fix = repairSettings(core.repos.settings.get(), {
+    riotLoggedIn: riot.loggedIn,
+    webhookConfigured: secrets.has(WEBHOOK_KEY),
+    botConfigured: secrets.has(BOT_TOKEN_KEY),
+    botUserId: core.repos.meta.get('discord_bot_user')
+  })
+  if (Object.keys(fix).length) {
+    core.repos.settings.update(fix)
+    logger.info(`リセットされていた設定を復元しました: ${Object.keys(fix).join(', ')}`)
+  }
 
   registerIpc()
   createTray()
@@ -391,7 +403,9 @@ function registerIpc(): void {
     runs: core.repos.runs.list(200),
     errors: core.repos.errors.list(200)
   }))
-  handle('settings:update', (patch) => {
+  handle('settings:update', async (patch) => {
+    // revoking the risk acknowledgement also removes the Riot login (no unofficial access without consent)
+    if (patch.riskAcknowledged === false && riot.loggedIn) await riotLogout()
     const s = core.repos.settings.update(patch)
     if (patch.launchAtLogin !== undefined) applyLoginItem(s.launchAtLogin)
     void core.scheduler.tick()
@@ -424,6 +438,7 @@ function registerIpc(): void {
     if (token?.trim()) secrets.set(BOT_TOKEN_KEY, t)
     core.repos.meta.set('discord_bot_app', JSON.stringify(app))
     core.repos.settings.update({ discordUserId: userId.trim(), notifyChannel: 'bot' })
+    core.repos.meta.set('discord_bot_user', userId.trim()) // backup used by repairSettings
     logger.info(`Discord BOT を設定しました: ${app.name}`)
     broadcast()
     return { app, links: botInstallLinks(app.id) }
@@ -432,6 +447,7 @@ function registerIpc(): void {
     secrets.delete(BOT_TOKEN_KEY)
     botClient = null
     core.repos.meta.set('discord_bot_app', null)
+    core.repos.meta.set('discord_bot_user', null)
     logger.info('Discord BOT トークンを削除しました')
     broadcast()
     return true
@@ -466,11 +482,7 @@ function registerIpc(): void {
     }
   })
   handle('riot:logout', async () => {
-    secrets.delete(RIOT_COOKIES_KEY)
-    core.saveRiotAccount(null)
-    riot.reset()
-    await wipeRiotSessions()
-    logger.info('Riot連携を解除し、認証情報を破棄しました')
+    await riotLogout()
     broadcast()
     return true
   })
@@ -532,6 +544,15 @@ function loadRiotCookies(): Record<string, string> | null {
   } catch {
     return null
   }
+}
+
+/** Removes every stored Riot credential (encrypted cookies, account info, login browser session). */
+async function riotLogout(): Promise<void> {
+  secrets.delete(RIOT_COOKIES_KEY)
+  core.saveRiotAccount(null)
+  riot.reset()
+  await wipeRiotSessions()
+  logger.info('Riot連携を解除し、認証情報を破棄しました')
 }
 
 let afterLoginFn: (who: string) => Promise<unknown> = async () => undefined

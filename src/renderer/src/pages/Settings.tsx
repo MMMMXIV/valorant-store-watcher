@@ -200,7 +200,7 @@ function RiotCard({ s, save }: { s: Settings; save: SaveFn }) {
       )}
       <div className="mt-4 border-t border-ink-700 pt-3">
         <button className="text-xs text-mute underline hover:text-bone" onClick={() => void save({ riskAcknowledged: false }, '非公式方式を無効にしました')}>
-          非公式方式を無効にする（同意を取り消す）
+          非公式方式を無効にする（同意を取り消し、Riotのログイン情報も削除します）
         </button>
       </div>
     </Card>

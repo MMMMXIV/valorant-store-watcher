@@ -11,6 +11,7 @@ import {
   sendWebhook,
   DEFAULT_SETTINGS,
   SettingsPatchSchema,
+  repairSettings,
   EMPTY_MONITOR_STATE,
   DiscordPermanentError,
   isValidWebhookUrl,
@@ -405,6 +406,26 @@ describe('設定の部分更新（画面からの変更）', () => {
     expect(SettingsPatchSchema.parse({ providerId: 'manual-file' })).toEqual({ providerId: 'riot' })
     expect(() => SettingsPatchSchema.parse({ checkTime: '25:00' })).toThrow()
     expect(() => SettingsPatchSchema.parse({ unknownKey: 1 })).toThrow()
+  })
+})
+
+describe('アップデート後の設定復元 (repairSettings)', () => {
+  const base = { ...DEFAULT_SETTINGS }
+  const facts = { riotLoggedIn: false, webhookConfigured: false, botConfigured: false, botUserId: null }
+  it('restores the risk acknowledgement when Riot login data still exists', () => {
+    expect(repairSettings(base, { ...facts, riotLoggedIn: true })).toEqual({ riskAcknowledged: true })
+    expect(repairSettings({ ...base, riskAcknowledged: true }, { ...facts, riotLoggedIn: true })).toEqual({})
+    expect(repairSettings(base, facts)).toEqual({})
+  })
+  it('restores the BOT target and user id', () => {
+    expect(repairSettings(base, { ...facts, botConfigured: true, botUserId: '123456789012345678' })).toEqual({
+      discordUserId: '123456789012345678',
+      notifyChannel: 'bot'
+    })
+    // user id lost (pre-1.3.3 data): still switch to BOT so the screen asks for the id
+    expect(repairSettings(base, { ...facts, botConfigured: true })).toEqual({ notifyChannel: 'bot' })
+    // a configured Webhook is a valid user choice → keep it
+    expect(repairSettings(base, { ...facts, botConfigured: true, webhookConfigured: true })).toEqual({})
   })
 })
 
