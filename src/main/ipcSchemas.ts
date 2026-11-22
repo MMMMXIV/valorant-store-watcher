@@ -24,6 +24,20 @@ export const IpcSchemas = {
   'diagnostics:get': z.undefined(),
   'app:openExternal': z.object({ url: z.string().url().max(500) }),
   'app:openLogs': z.undefined(),
+  'tier:load': z.undefined(),
+  'tier:save': z.object({ data: z.unknown() }),
+  'tier:export': z.object({
+    action: z.enum(['save', 'copy', 'sharex']),
+    spec: z.object({
+      title: z.string().max(80),
+      dateLabel: z.string().max(40),
+      tiers: z.array(z.object({
+        label: z.string().max(6),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+        skins: z.array(z.object({ name: z.string().max(80), weapon: z.string().max(40), icon: z.string().url().max(400).nullable() })).max(200)
+      })).max(10)
+    })
+  }),
   'riot:login': z.undefined(),
   'riot:loginWithSsid': z.object({ ssid: z.string().min(10).max(4096) }),
   'riot:logout': z.undefined(),

@@ -96,6 +96,11 @@ interface VswApi {
     clear(): Promise<boolean>
     test(): Promise<{ ok: boolean; message: string }>
   }
+  tier: {
+    load(): Promise<unknown>
+    save(data: unknown): Promise<boolean>
+    export(action: 'save' | 'copy' | 'sharex', spec: unknown): Promise<{ ok: boolean; canceled?: boolean; path?: string; copied?: boolean; shared?: boolean }>
+  }
   update: { check(): Promise<UpdateState>; download(): Promise<UpdateState>; install(): Promise<void> }
   riot: {
     login(): Promise<{ account: AppState['riot']['account']; check: CheckSummary }>

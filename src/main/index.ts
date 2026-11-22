@@ -1,11 +1,13 @@
+import fs from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { WatcherCore, repairSettings, DiscordBotClient, botInstallLinks, isValidBotToken, isValidUserId, webhookNotifier, RiotStoreProvider, RiotAuthRequiredError, parseSsidInput, isValidWebhookUrl, formatZonedDateTime, type CheckPlan } from '../core'
 import { matchWishlist } from '../core/monitor/matcher'
 import { IpcSchemas, type IpcChannel } from './ipcSchemas'
 import { Logger } from './logger'
 import { SecretStore } from './secrets'
 import { electronAuthorize, openRiotLoginWindow, silentRiotLogin, wipeRiotSessions } from './riotAuth'
+import { renderTierImage, type TierSpec } from './tierImage'
 import { AppUpdater } from './updater'
 
 const WEBHOOK_KEY = 'discord.webhook'
@@ -227,7 +229,7 @@ function isAppUrl(url: string): boolean {
   return url.startsWith('file://')
 }
 
-const EXTERNAL_ALLOW = ['https://discord.com/', 'https://auth.riotgames.com/', 'https://support.discord.com/', 'https://valorant-api.com/', 'https://developer.riotgames.com/', 'https://www.riotgames.com/', 'https://github.com/']
+const EXTERNAL_ALLOW = ['https://discord.com/', 'https://auth.riotgames.com/', 'https://twitter.com/intent/', 'https://x.com/intent/', 'https://support.discord.com/', 'https://valorant-api.com/', 'https://developer.riotgames.com/', 'https://www.riotgames.com/', 'https://github.com/']
 function openExternalSafe(url: string): void {
   if (EXTERNAL_ALLOW.some((p) => url.startsWith(p))) void shell.openExternal(url)
 }
@@ -515,6 +517,38 @@ function registerIpc(): void {
   })
   handle('app:openExternal', ({ url }) => openExternalSafe(url))
   handle('app:openLogs', () => shell.openPath(path.dirname(logger.file)))
+  handle('tier:load', () => {
+    const raw = core.repos.meta.get('tierlist')
+    try {
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
+  handle('tier:save', ({ data }) => {
+    core.repos.meta.set('tierlist', JSON.stringify(data))
+    return true
+  })
+  handle('tier:export', async ({ spec, action }) => {
+    const png = await renderTierImage(spec as TierSpec)
+    const name = `valorant-tier-${new Date().toISOString().slice(0, 10)}.png`
+    if (action === 'save') {
+      const r = await dialog.showSaveDialog(mainWindow ?? undefined!, { defaultPath: name, filters: [{ name: 'PNG画像', extensions: ['png'] }] })
+      if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+      await fs.promises.writeFile(r.filePath, png)
+      logger.info('Tier表を画像に保存しました')
+      return { ok: true, path: r.filePath }
+    }
+    const image = nativeImage.createFromBuffer(png)
+    clipboard.writeImage(image)
+    if (action === 'sharex') {
+      const text = encodeURIComponent('私のVALORANTスキンTier表 #VALORANT #StoreWatcher')
+      const url = encodeURIComponent('https://store-watcher-guide.pages.dev/')
+      await shell.openExternal(`https://x.com/intent/tweet?text=${text}&url=${url}`)
+      return { ok: true, copied: true, shared: true }
+    }
+    return { ok: true, copied: true }
+  })
 }
 
 let botClient: { token: string; client: DiscordBotClient } | null = null

@@ -1,19 +1,21 @@
 import { useState } from 'react'
 import { DataProvider, useData } from './lib/store'
-import { IconCatalog, IconDashboard, IconHeart, IconHistory, IconLogo, IconSettings } from './components/Icons'
+import { IconCatalog, IconDashboard, IconHeart, IconHistory, IconLogo, IconSettings, IconTier } from './components/Icons'
 import { Dashboard } from './pages/Dashboard'
 import { Catalog } from './pages/Catalog'
 import { Wishlist } from './pages/Wishlist'
+import { TierList } from './pages/TierList'
 import { History } from './pages/History'
 import { SettingsPage } from './pages/Settings'
 import { fmtDateTime, fmtRelative } from './lib/format'
 
-export type Page = 'dashboard' | 'catalog' | 'wishlist' | 'history' | 'settings'
+export type Page = 'dashboard' | 'catalog' | 'wishlist' | 'tier' | 'history' | 'settings'
 
 const NAV: Array<{ id: Page; label: string; sub: string; icon: typeof IconDashboard }> = [
   { id: 'dashboard', label: 'ダッシュボード', sub: 'DASHBOARD', icon: IconDashboard },
   { id: 'catalog', label: 'スキンカタログ', sub: 'CATALOG', icon: IconCatalog },
   { id: 'wishlist', label: 'ウィッシュリスト', sub: 'WISHLIST', icon: IconHeart },
+  { id: 'tier', label: 'Tier表メーカー', sub: 'TIER LIST', icon: IconTier },
   { id: 'history', label: '履歴', sub: 'HISTORY', icon: IconHistory },
   { id: 'settings', label: '設定', sub: 'SETTINGS', icon: IconSettings }
 ]
@@ -72,6 +74,8 @@ function Shell() {
             <Catalog />
           ) : page === 'wishlist' ? (
             <Wishlist go={setPage} />
+          ) : page === 'tier' ? (
+            <TierList />
           ) : page === 'history' ? (
             <History />
           ) : (

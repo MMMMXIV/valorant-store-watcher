@@ -35,6 +35,11 @@ const api = {
     clear: () => invoke('bot:clear'),
     test: () => invoke('bot:test')
   },
+  tier: {
+    load: () => invoke('tier:load'),
+    save: (data: unknown) => invoke('tier:save', { data }),
+    export: (action: 'save' | 'copy' | 'sharex', spec: unknown) => invoke('tier:export', { action, spec })
+  },
   update: {
     check: () => invoke('update:check'),
     download: () => invoke('update:download'),
