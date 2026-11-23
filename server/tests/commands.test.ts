@@ -139,3 +139,79 @@ describe('サーバー: Discordコマンド', () => {
     expect(r.payload.embeds![0].description).toContain(`⭐ ${reaver.nameJa}`)
   })
 })
+
+import { SqliteUserStore } from '../src/sqliteUserStore'
+import os from 'node:os'
+
+describe('サーバー: SQLite 永続化', () => {
+  it('persists users, accounts and encrypted cookies across reopen; delete wipes secrets', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsw-srv-'))
+    const file = path.join(dir, 'server.sqlite')
+    const box = new SecretBox(SecretBox.generateKey())
+    let store = await SqliteUserStore.open(file)
+    const acc = account('main', 'メイン', MAIN)
+    saveAccountCookies(box, 'd1', acc, { ssid: 'SSID_MAIN_abcdefghijklmnop' })
+    store.upsertUser({ discordUserId: 'd1', consentedAt: 'x', consentVersion: '1', pushToken: null, accounts: [acc], wishlistSkinIds: ['s1', 's2'] })
+    store.close()
+
+    store = await SqliteUserStore.open(file)
+    const u = store.getUser('d1')!
+    expect(u.wishlistSkinIds).toEqual(['s1', 's2'])
+    expect(u.accounts[0].label).toBe('メイン')
+    // cookie still decrypts after reopen
+    expect(JSON.parse(box.decrypt(u.accounts[0].encCookies!, 'd1:main')).ssid).toBe('SSID_MAIN_abcdefghijklmnop')
+    store.deleteUser('d1')
+    expect(store.getUser('d1')).toBeNull()
+    store.close()
+  })
+})
+
+import { COMMANDS, interactionOptions, interactionUserId, type Interaction } from '../src/discord'
+
+describe('サーバー: Discord 配線', () => {
+  it('command set and interaction parsing', () => {
+    expect(COMMANDS.map((c) => c.name).sort()).toEqual(['bundle', 'check', 'connect', 'nightmarket', 'store', 'wishlist'])
+    const i: Interaction = { id: '1', token: 't', type: 2, data: { name: 'store', options: [{ name: 'account', value: 'メイン' }] }, member: { user: { id: 'u9' } } }
+    expect(interactionUserId(i)).toBe('u9')
+    expect(interactionOptions(i)).toEqual({ account: 'メイン' })
+    expect(interactionUserId({ id: '1', token: 't', type: 2, user: { id: 'dm' } })).toBe('dm')
+  })
+})
+
+import { ConnectService, connectPageHtml } from '../src/connect'
+
+describe('サーバー: /connect', () => {
+  it('links an account only with consent + valid ssid, and records the link to the Discord user', async () => {
+    const box = new SecretBox(SecretBox.generateKey())
+    const store = new InMemoryUserStore()
+    const riot = fakeRiot()
+    const svc = new ConnectService({ userStore: store, box, fetchImpl: riot.fetchImpl, authorize: riot.authorize, getClientVersion: async () => 'v', now: () => new Date(riot.state.now) })
+    const token = svc.createLink('discord-42')
+    expect(svc.tokenValid(token)).toBe(true)
+    expect(connectPageHtml(token)).toContain(token)
+
+    // no consent → refused
+    expect((await svc.submit(token, { consent: false, ssid: 'SSID_MAIN_abcdefghijklmnop' })).ok).toBe(false)
+    // bad ssid → refused
+    expect((await svc.submit(token, { consent: true, ssid: 'short' })).ok).toBe(false)
+    // valid → linked
+    const ok = await svc.submit(token, { consent: true, ssid: 'SSID_MAIN_abcdefghijklmnop' })
+    expect(ok.ok).toBe(true)
+    expect(ok.message).toContain('MainP#JP1')
+    const u = store.getUser('discord-42')!
+    expect(u.consentedAt).toBeTruthy()
+    expect(u.accounts[0].puuid).toBe(MAIN)
+    // token consumed
+    expect(svc.tokenValid(token)).toBe(false)
+  })
+
+  it('expired/unknown token is refused', async () => {
+    const box = new SecretBox(SecretBox.generateKey())
+    const store = new InMemoryUserStore()
+    const riot = fakeRiot()
+    const svc = new ConnectService({ userStore: store, box, fetchImpl: riot.fetchImpl, authorize: riot.authorize, getClientVersion: async () => 'v', now: () => new Date(riot.state.now), tokenTtlMs: 1 })
+    const token = svc.createLink('d')
+    riot.state.now += 10
+    expect((await svc.submit(token, { consent: true, ssid: 'SSID_MAIN_abcdefghijklmnop' })).message).toContain('有効期限')
+  })
+})
